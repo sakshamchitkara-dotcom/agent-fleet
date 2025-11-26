@@ -98,6 +98,8 @@ class Sandbox:
         timeout = timeout or self.timeout
         argv = self._docker_argv(cmd) if self.mode == "docker" else ["/bin/sh", "-c", cmd]
         env = {k: v for k, v in os.environ.items() if not SECRET_ENV.search(k)}
+        # Stale .pyc files can mask same-second edits (mtime granularity); never write them.
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
         proc = subprocess.Popen(
             argv, cwd=self.root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL, start_new_session=True, text=True, errors="replace",
