@@ -57,8 +57,10 @@ class Toolbox:
         self.test_cmd = test_cmd
 
     # -- schema -----------------------------------------------------------
-    def schemas(self, finish_schema: dict, finish_description: str) -> list[dict]:
-        tools = [{"name": n, "description": d, "input_schema": s} for n, (d, s) in SCHEMAS.items()]
+    def schemas(self, finish_schema: dict, finish_description: str,
+                allowed: tuple[str, ...] | None = None) -> list[dict]:
+        tools = [{"name": n, "description": d, "input_schema": s} for n, (d, s) in SCHEMAS.items()
+                 if allowed is None or n in allowed]
         tools.append({"name": "finish", "description": finish_description, "input_schema": finish_schema})
         return tools
 
