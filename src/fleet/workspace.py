@@ -47,11 +47,13 @@ def head(repo: Path) -> str:
     return git(repo, "rev-parse", "HEAD").strip()
 
 
-def add_worktree(repo: Path, path: Path, branch: str, base: str) -> Path:
+def add_worktree(repo: Path, path: Path, branch: str | None, base: str) -> Path:
+    """Check out `base` into `path` on a fresh `branch` (detached if branch is None)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         remove_worktree(repo, path)
-    git(repo, "worktree", "add", "--quiet", "-B", branch, str(path), base)
+    target = ["-B", branch] if branch else ["--detach"]
+    git(repo, "worktree", "add", "--quiet", *target, str(path), base)
     return path
 
 
@@ -66,7 +68,12 @@ def commit_all(worktree: Path, message: str) -> bool:
     git(worktree, "add", "-A")
     if not git(worktree, "status", "--porcelain").strip():
         return False
-    ident = [] if git(worktree, "config", "user.email", check=False).strip() else [
-        "-c", "user.name=agent-fleet", "-c", "user.email=agent-fleet@users.noreply.github.com"]
-    git(worktree, *ident, "commit", "--quiet", "--no-verify", "-m", message)
+    git(worktree, *ident(worktree), "commit", "--quiet", "--no-verify", "-m", message)
     return True
+
+
+def ident(repo: Path) -> list[str]:
+    """Use the user's git identity; fall back to a bot identity when none is configured."""
+    if git(repo, "config", "user.email", check=False).strip():
+        return []
+    return ["-c", "user.name=agent-fleet", "-c", "user.email=agent-fleet@users.noreply.github.com"]
