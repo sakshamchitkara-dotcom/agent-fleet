@@ -1,0 +1,45 @@
+import json
+
+from fleet.orchestrator import Orchestrator
+from fleet.queue import Queue
+
+FIX_SCRIPT = {
+    "planner": [[{"name": "finish", "input": {"summary": "s", "subtasks": [
+        {"title": "Fix add", "description": "make add() add"}]}}]],
+    "worker": [[{"name": "apply_patch", "input": {"path": "calc.py", "old": "a - b", "new": "a + b"}}]],
+    "reviewer": [[{"name": "finish", "input": {"verdict": "approve", "feedback": "ok"}}]],
+}
+
+
+def setup(tmp_path, script=FIX_SCRIPT):
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps(script))
+    return Queue(tmp_path / "q.db"), dict(backend="scripted", script=str(p), sandbox="subprocess",
+                                          test_cmd="python3 -m unittest -q")
+
+
+def test_drains_queue_concurrently(repo, tmp_path):
+    q, opts = setup(tmp_path)
+    ids = [q.submit(str(repo), "fix add", **opts) for _ in range(3)]
+    Orchestrator(tmp_path / "home", q, concurrency=2).run(drain=True, poll=0.05)
+    for tid in ids:
+        t = q.get(tid)
+        assert t["status"] == "done", t["error"]
+        assert t["result"]["branch"] == f"fleet/{tid}" and t["stage"] == "finished"
+
+
+def test_crash_is_retried_then_failed(tmp_path):
+    q, opts = setup(tmp_path)
+    tid = q.submit(str(tmp_path / "missing"), "x", max_attempts=2, **opts)
+    Orchestrator(tmp_path / "home", q).run(drain=True, poll=0.05)
+    t = q.get(tid)
+    assert t["status"] == "failed" and t["attempts"] == 2 and "not a git repository" in t["error"]
+
+
+def test_pr_on_local_repo_is_refused(repo, tmp_path):
+    q, opts = setup(tmp_path)
+    tid = q.submit(str(repo), "fix add", pr=True, **opts)
+    Orchestrator(tmp_path / "home", q).run(drain=True, poll=0.05)
+    t = q.get(tid)
+    assert t["status"] == "failed" and "local repos stay local" in t["error"]
+    assert t["result"]["tests_passed"] and t["pr_url"] == ""  # work kept on the branch
