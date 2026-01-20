@@ -77,3 +77,15 @@ def test_factory_scripted(tmp_path):
     p.write_text(json.dumps(SCRIPT))
     f = ModelFactory("scripted", script=p)
     assert isinstance(f("worker-1"), ScriptedModel)
+
+
+def test_exhausted_script_emits_schema_valid_finish():
+    from fleet.agent import validate
+    from fleet.roles import ROLES
+    from fleet.tools import Toolbox
+    for role in ROLES.values():
+        tools = Toolbox(".").schemas(role.finish_schema, "d", role.tools)
+        call = ScriptedModel({}, role.name).complete("s", [], tools).tool_uses[0]
+        assert validate(call["input"], role.finish_schema) is None
+        if role.name == "reviewer":
+            assert call["input"]["verdict"] == "request_changes"
