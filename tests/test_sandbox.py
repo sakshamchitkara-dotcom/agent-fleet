@@ -67,3 +67,9 @@ def test_docker_backend_has_no_network(tmp_path):
     r = sb.run("echo ok > out.txt && python -c \"import socket; socket.create_connection(('1.1.1.1', 53), 3)\"")
     assert (tmp_path / "out.txt").read_text().strip() == "ok"
     assert r.exit_code != 0  # network unreachable inside the container
+
+
+def test_python_resolves_to_fleet_interpreter(tmp_path):
+    import sys
+    r = Sandbox(tmp_path, mode="subprocess").run("python -c 'import sys; print(sys.prefix)'")
+    assert r.output.strip() == sys.prefix

@@ -14,6 +14,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -100,6 +101,8 @@ class Sandbox:
         env = {k: v for k, v in os.environ.items() if not SECRET_ENV.search(k)}
         # Stale .pyc files can mask same-second edits (mtime granularity); never write them.
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+        if self.mode == "subprocess":  # `python` resolves to fleet's own interpreter
+            env["PATH"] = os.path.dirname(sys.executable) + os.pathsep + env.get("PATH", "")
         proc = subprocess.Popen(
             argv, cwd=self.root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL, start_new_session=True, text=True, errors="replace",
