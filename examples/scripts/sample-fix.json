@@ -1,0 +1,36 @@
+{
+  "planner": [
+    [{"text": "Let me look at the layout and the failing tests."},
+     {"name": "list_dir", "input": {"path": "."}},
+     {"name": "run_tests", "input": {}}],
+    [{"name": "read_file", "input": {"path": "shop/pricing.py"}},
+     {"name": "read_file", "input": {"path": "shop/text.py"}}],
+    [{"name": "finish", "input": {
+      "summary": "Two independent bugs: apply_discount returns the discount amount instead of the discounted price, and slugify neither collapses repeated separators nor strips them from the ends.",
+      "subtasks": [
+        {"title": "Fix apply_discount", "description": "In shop/pricing.py, apply_discount(price, percent) returns price * percent / 100 (the discount itself). It must return the discounted price, price * (1 - percent / 100), rounded to cents. cart_total relies on it. Tests: tests/test_pricing.py."},
+        {"title": "Fix slugify", "description": "In shop/text.py, slugify must collapse runs of non-alphanumeric characters into a single '-' and strip leading/trailing '-'. Tests: tests/test_text.py."}
+      ]}}]
+  ],
+  "worker-1": [
+    [{"name": "read_file", "input": {"path": "shop/pricing.py"}}],
+    [{"text": "apply_discount returns the discount, not the discounted price. Fixing at the root so cart_total is fixed too."},
+     {"name": "apply_patch", "input": {"path": "shop/pricing.py",
+       "old": "    return round(price * percent / 100, 2)",
+       "new": "    return round(price * (1 - percent / 100), 2)"}}],
+    [{"name": "run_command", "input": {"command": "python -m unittest tests.test_pricing -v"}}],
+    [{"name": "finish", "input": {"summary": "apply_discount now returns price * (1 - percent/100); all pricing tests pass (cart_total fixed through it). Remaining slugify failures belong to the other subtask.", "tests_passed": true}}]
+  ],
+  "worker-2": [
+    [{"name": "read_file", "input": {"path": "shop/text.py"}}],
+    [{"name": "apply_patch", "input": {"path": "shop/text.py",
+       "old": "    return re.sub(r\"[^a-z0-9]\", \"-\", title.lower())",
+       "new": "    return re.sub(r\"[^a-z0-9]+\", \"-\", title.lower()).strip(\"-\")"}}],
+    [{"name": "run_command", "input": {"command": "python -m unittest tests.test_text -v"}}],
+    [{"name": "finish", "input": {"summary": "slugify collapses separator runs with [^a-z0-9]+ and strips edge dashes; text tests pass.", "tests_passed": true}}]
+  ],
+  "reviewer": [
+    [{"name": "git_diff", "input": {}}],
+    [{"name": "finish", "input": {"verdict": "approve", "feedback": "Root-cause fix, minimal diff, subtask tests pass."}}]
+  ]
+}
