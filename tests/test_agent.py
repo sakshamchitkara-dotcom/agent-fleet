@@ -32,6 +32,9 @@ def test_agent_fixes_bug_and_logs_every_step(repo, tmp_path):
     events = [r["event"] for r in read(log)]
     assert events[0] == "start" and events[-1] == "end"
     assert events.count("model") == 4 and events.count("tool") == 4
+    start = read(log)[0]
+    assert start["sandbox"] == "subprocess" and start["model"] == "ScriptedModel"
+    assert "finish" in start["tools"]
 
 
 def test_bad_inputs_become_error_results(repo, tmp_path):
