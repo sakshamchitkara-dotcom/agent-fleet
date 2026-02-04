@@ -14,6 +14,7 @@ from . import github
 from .orchestrator import Orchestrator
 from .queue import Queue
 from .trajectory import read
+from .workspace import parse_github
 
 
 def home_dir(args) -> Path:
@@ -46,6 +47,8 @@ def add_task_args(p: argparse.ArgumentParser) -> None:
 def submit(args, repo: str, text: str, **extra) -> str:
     if args.backend == "scripted" and not args.script:
         sys.exit("--backend scripted needs --script")
+    if parse_github(repo) is None:  # local repo: store an absolute path, workers may run elsewhere
+        repo = str(Path(repo).expanduser().resolve())
     q = Queue(home_dir(args) / "fleet.db")
     return q.submit(repo, text, max_attempts=args.max_attempts, **task_options(args), **extra)
 
