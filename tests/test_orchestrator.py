@@ -43,3 +43,20 @@ def test_pr_on_local_repo_is_refused(repo, tmp_path):
     t = q.get(tid)
     assert t["status"] == "failed" and "local repos stay local" in t["error"]
     assert t["result"]["tests_passed"] and t["pr_url"] == ""  # work kept on the branch
+
+
+def test_permanent_api_errors_not_retried():
+    import anthropic
+    import httpx2 as httpx
+
+    from fleet.orchestrator import permanent
+
+    def err(cls, code):
+        req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        return cls("x", response=httpx.Response(code, request=req), body=None)
+
+    assert permanent(err(anthropic.AuthenticationError, 401))
+    assert permanent(err(anthropic.BadRequestError, 400))
+    assert not permanent(err(anthropic.RateLimitError, 429))
+    assert not permanent(err(anthropic.InternalServerError, 500))
+    assert not permanent(RuntimeError("git failed"))

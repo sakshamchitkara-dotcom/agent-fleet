@@ -9,7 +9,7 @@ description = "A fleet of autonomous coding agents: plan, edit, test, review, in
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = ["anthropic>=0.60"]
+dependencies = ["anthropic>=1.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
