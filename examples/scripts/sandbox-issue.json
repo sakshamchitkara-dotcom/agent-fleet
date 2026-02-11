@@ -1,0 +1,26 @@
+{
+  "planner": [
+    [{"name": "run_tests", "input": {}},
+     {"name": "grep", "input": {"pattern": "def apply_discount|apply_discount\\(", "path": "shop"}}],
+    [{"name": "read_file", "input": {"path": "shop/pricing.py"}}],
+    [{"name": "finish", "input": {
+      "summary": "Single root cause: apply_discount computes the discount amount instead of the discounted price; cart_total is fixed through it.",
+      "subtasks": [
+        {"title": "Fix inverted discount in apply_discount", "description": "In shop/pricing.py, apply_discount(price, percent) returns price * percent / 100. It must return price * (1 - percent / 100), rounded to cents, keeping the percent range validation. cart_total calls it, so no change is needed there. Verify with tests/test_pricing.py."}
+      ]}}]
+  ],
+  "worker": [
+    [{"name": "read_file", "input": {"path": "shop/pricing.py"}},
+     {"name": "read_file", "input": {"path": "tests/test_pricing.py"}}],
+    [{"text": "Root cause is the return expression in apply_discount; fixing it there also fixes cart_total."},
+     {"name": "apply_patch", "input": {"path": "shop/pricing.py",
+       "old": "    return round(price * percent / 100, 2)",
+       "new": "    return round(price * (1 - percent / 100), 2)"}}],
+    [{"name": "run_tests", "input": {}}],
+    [{"name": "finish", "input": {"summary": "apply_discount now returns the discounted price (price * (1 - percent/100)); cart_total is correct through it. Full suite passes.", "tests_passed": true}}]
+  ],
+  "reviewer": [
+    [{"name": "git_diff", "input": {}}, {"name": "run_tests", "input": {}}],
+    [{"name": "finish", "input": {"verdict": "approve", "feedback": "One-line root-cause fix in apply_discount; validation preserved; all 6 tests pass."}}]
+  ]
+}

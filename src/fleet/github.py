@@ -66,6 +66,8 @@ def pr_body(task: dict, result: dict) -> str:
               f"## Tests: {'PASSING' if result.get('tests_passed') else 'FAILING'}", "",
               "```", result.get("test_output", "")[-2500:].strip(), "```", "",
               f"_Opened by agent-fleet (task `{task['id']}`)._"]
+    if task.get("options", {}).get("issue"):
+        lines += ["", f"Closes #{task['options']['issue']}"]
     return "\n".join(lines)
 
 

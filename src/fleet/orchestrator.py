@@ -17,6 +17,13 @@ from .workspace import parse_github
 log = logging.getLogger("fleet")
 
 
+def short_title(text: str, limit: int = 72) -> str:
+    """Cut at a word boundary so PR titles don't end mid-word."""
+    if len(text) <= limit:
+        return text
+    return text[:limit - 3].rsplit(" ", 1)[0].rstrip(":,;") + "..."
+
+
 def spec_for(task: dict) -> TaskSpec:
     o = task["options"]
     return TaskSpec(
@@ -89,6 +96,6 @@ class Orchestrator:
         gh = parse_github(task["repo"])
         if gh is None:
             raise github.NotOwnedError("--pr requires a GitHub repo (owner/repo); local repos stay local")
-        title = task["options"].get("title") or task["text"].strip().splitlines()[0][:72]
+        title = task["options"].get("title") or short_title(task["text"].strip().splitlines()[0])
         return github.open_pr(Path(result["repo"]), *gh, result["branch"], title,
                               github.pr_body(task, result))

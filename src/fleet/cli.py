@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from . import github
-from .orchestrator import Orchestrator
+from .orchestrator import Orchestrator, short_title
 from .queue import Queue
 from .trajectory import read
 from .workspace import parse_github
@@ -69,7 +69,7 @@ def cmd_issue(args) -> None:
     issue = github.fetch_issue(owner, repo, number)
     print(f"issue: {issue['title']} ({issue['url']})")
     tid = submit(args, f"{owner}/{repo}", github.issue_task_text(owner, repo, number, issue),
-                 title=f"Fix #{number}: {issue['title']}"[:72])
+                 title=short_title(f"Fix #{number}: {issue['title']}"), issue=number)
     drain_and_report(args, tid)
 
 
