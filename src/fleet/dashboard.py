@@ -16,6 +16,7 @@ PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>agent-fleet</title>
+<link rel="icon" href="data:,">
 <style>
   :root { --bg:#fbfbfa; --fg:#1d1d1b; --muted:#6b6b66; --line:#e4e4df; --card:#fff;
           --ok:#1a7f37; --bad:#c2261d; --run:#9a6700; --accent:#3050c8; }
@@ -55,7 +56,7 @@ function describe(e) {
   if (e.event === "tool") return `${e.is_error ? "!" : ">"} ${e.name} ${JSON.stringify(e.input).slice(0, 160)}`;
   if (e.event === "model") { const t = (e.content || []).filter(b => b.type === "text").map(b => b.text).join(" ");
     return `~ turn ${e.turn} (${e.stop_reason}) ${t.slice(0, 300)}`; }
-  if (e.event === "start") return `+ ${e.task.slice(0, 300)}`;
+  if (e.event === "start") return `+ start (${e.sandbox || "?"} sandbox): ${e.task.split("\\n").find(l => l.trim() && !/^(Overall )?task:$/i.test(l.trim())) || ""}`.slice(0, 200);
   if (e.event === "end") return `= ${e.status} after ${e.turns} turns, ${e.tokens} tokens`;
   if (e.event === "compact") return `# compacted ${e.messages_before} messages`;
   return `# ${e.event}`;
