@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass, field
 
 from .roles import Role
@@ -18,6 +19,25 @@ class Budget:
     max_turns: int = 40
     max_tokens: int = 3_000_000   # cumulative input + output across the run
     compact_at: int = 150_000     # per-request input tokens that trigger compaction
+
+
+class TokenMeter:
+    """Task-wide token budget shared by every agent working on one task."""
+
+    def __init__(self, limit: int | None = None):
+        self.limit = limit
+        self.used = 0
+        self.by_agent: dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    def charge(self, agent: str, n: int) -> None:
+        with self._lock:
+            self.used += n
+            self.by_agent[agent] = self.by_agent.get(agent, 0) + n
+
+    @property
+    def exhausted(self) -> bool:
+        return self.limit is not None and self.used >= self.limit
 
 
 @dataclass
@@ -51,13 +71,14 @@ def validate(args, schema: dict) -> str | None:
 
 class Agent:
     def __init__(self, name: str, role: Role, model, toolbox: Toolbox, trajectory: Trajectory,
-                 budget: Budget | None = None):
+                 budget: Budget | None = None, meter: TokenMeter | None = None):
         self.name = name
         self.system = role.system
         self.model = model
         self.toolbox = toolbox
         self.log = trajectory
         self.budget = budget or Budget()
+        self.meter = meter or TokenMeter()
         self.tools = toolbox.schemas(role.finish_schema, role.finish_description, role.tools)
         self.schemas = {t["name"]: t["input_schema"] for t in self.tools}
 
@@ -69,8 +90,12 @@ class Agent:
         for turn in range(1, self.budget.max_turns + 1):
             if tokens >= self.budget.max_tokens:
                 return self._end("budget_exhausted", turn - 1, tokens, reason="token budget")
+            if self.meter.exhausted:
+                return self._end("budget_exhausted", turn - 1, tokens, reason="task token budget")
             reply = self.model.complete(self.system, messages, self.tools)
-            tokens += reply.usage.get("input_tokens", 0) + reply.usage.get("output_tokens", 0)
+            used = reply.usage.get("input_tokens", 0) + reply.usage.get("output_tokens", 0)
+            tokens += used
+            self.meter.charge(self.name, used)
             self.log.log("model", turn=turn, stop_reason=reply.stop_reason, usage=reply.usage,
                          content=[_loggable(b) for b in reply.content])
             messages.append({"role": "assistant", "content": reply.content})
