@@ -52,3 +52,14 @@ def test_concurrent_claims_are_exclusive(tmp_path):
     [t.start() for t in threads]
     [t.join() for t in threads]
     assert sorted(got) == sorted(ids)
+
+
+def test_retry_only_failed_or_cancelled(tmp_path):
+    q = Queue(tmp_path / "q.db")
+    tid = q.submit("o/r", "x", max_attempts=1)
+    assert not q.retry(tid)  # still queued
+    q.claim()
+    q.fail(tid, "boom")
+    assert q.retry(tid)
+    t = q.get(tid)
+    assert t["status"] == "queued" and t["attempts"] == 0 and t["error"] == ""
