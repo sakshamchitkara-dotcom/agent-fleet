@@ -13,6 +13,7 @@ from pathlib import Path
 from . import github
 from .orchestrator import Orchestrator, short_title
 from .queue import Queue
+from .sandbox import DEFAULT_IMAGE
 from .trajectory import read
 from .workspace import parse_github
 
@@ -32,7 +33,7 @@ def task_options(args) -> dict:
 def add_task_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--test-cmd", default="python -m pytest -q", help="command that runs the test suite")
     p.add_argument("--sandbox", choices=["auto", "docker", "subprocess"], default="auto")
-    p.add_argument("--image", default="python:3.12-slim",
+    p.add_argument("--image", default=DEFAULT_IMAGE,
                    help="docker sandbox image (should contain your project's test dependencies)")
     p.add_argument("--backend", choices=["claude", "scripted"], default="claude")
     p.add_argument("--script", help="JSON script for the scripted backend")

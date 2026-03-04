@@ -10,7 +10,7 @@ from typing import Callable
 
 from .agent import Agent, AgentResult, Budget, TokenMeter
 from .roles import INTEGRATOR, PLANNER, REVIEWER, WORKER, Role
-from .sandbox import Sandbox
+from .sandbox import DEFAULT_IMAGE, Sandbox
 from .tools import Toolbox, diff, git
 from .trajectory import Trajectory
 from .workspace import add_worktree, commit_all, head, ident, prepare_repo, remove_worktree
@@ -26,7 +26,7 @@ class TaskSpec:
     text: str
     test_cmd: str = "python -m pytest -q"
     sandbox: str = "auto"
-    image: str = "python:3.12-slim"  # docker sandbox image; bake project deps into your own
+    image: str = DEFAULT_IMAGE  # docker sandbox image; bake project deps into your own
     max_workers: int = 3
     review_rounds: int = 2
     budget: Budget = field(default_factory=Budget)
