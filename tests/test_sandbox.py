@@ -74,3 +74,31 @@ def test_python_resolves_to_fleet_interpreter(tmp_path):
     import sys
     r = Sandbox(tmp_path, mode="subprocess").run("python -c 'import sys; print(sys.prefix)'")
     assert r.output.strip() == sys.prefix
+
+
+def test_isolation_is_reported(tmp_path):
+    sb = Sandbox(tmp_path, mode="subprocess")
+    assert sb.jail in ("sandbox-exec", "bwrap", "unshare", "none")
+    assert sb.isolation.startswith(sb.jail + ":")
+    assert Sandbox(tmp_path, mode="subprocess", jail="none").isolation.startswith("none:")
+
+
+CONFINING = ("sandbox-exec", "bwrap")
+
+
+@pytest.mark.skipif(Sandbox(".", mode="subprocess").jail not in CONFINING,
+                    reason="no write-confining jail on this host")
+def test_jail_confines_writes_and_network(tmp_path):
+    work, outside = tmp_path / "work", tmp_path / "outside"
+    work.mkdir(), outside.mkdir()
+    sb = Sandbox(work, mode="subprocess")
+    r = sb.run(f"echo ok > in.txt; echo x > \"$TMPDIR/t\" && echo tmp-ok; echo bad > {outside}/out.txt")
+    assert (work / "in.txt").read_text().strip() == "ok" and "tmp-ok" in r.output
+    assert not (outside / "out.txt").exists()
+    r = sb.run("python -c \"import socket; socket.create_connection(('1.1.1.1', 53), 3)\"")
+    assert r.exit_code != 0
+
+
+def test_unjailed_mode_still_runs(tmp_path):
+    r = Sandbox(tmp_path, mode="subprocess", jail="none").run("echo hi")
+    assert r.exit_code == 0 and "hi" in r.output
