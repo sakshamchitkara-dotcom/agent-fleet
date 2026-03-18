@@ -15,7 +15,8 @@ from fleet.trajectory import Trajectory
 def server(tmp_path):
     q = Queue(tmp_path / "fleet.db")
     tid = q.submit("o/r", "fix <script>alert(1)</script>")
-    Trajectory(tmp_path / "runs" / tid / "planner.jsonl", "planner").log("start", task="t")
+    Trajectory(tmp_path / "runs" / tid / "planner.jsonl", "planner").log("start", task="t",
+                                                                        isolation="bwrap: no network")
     Trajectory(tmp_path / "runs" / tid / "worker-1.jsonl", "worker-1").log("tool", name="run_tests",
                                                                           input={}, is_error=False)
     srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(tmp_path))
@@ -37,6 +38,7 @@ def test_pages_and_api(server):
     assert tasks[0]["id"] == tid
     detail = json.loads(get(f"{base}/api/task/{tid}")[1])
     assert list(detail["agents"]) == ["planner", "worker-1"]
+    assert detail["isolation"] == "bwrap: no network"
     assert detail["task"]["text"].startswith("fix <script>")  # raw in JSON; rendered via textContent
 
 

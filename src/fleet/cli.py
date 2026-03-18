@@ -14,7 +14,7 @@ from . import github
 from .orchestrator import Orchestrator, short_title
 from .queue import Queue
 from .sandbox import DEFAULT_IMAGE
-from .trajectory import read
+from .trajectory import isolation, read
 from .workspace import parse_github
 
 
@@ -107,6 +107,8 @@ def show(args, tid: str) -> None:
     r = t["result"] or {}
     print(f"task {t['id']}: {t['status']} ({t['stage']}), attempts {t['attempts']}/{t['max_attempts']}")
     print(f"repo: {t['repo']}")
+    if iso := isolation(home_dir(args) / "runs" / t["id"]):
+        print(f"sandbox: {iso}")
     if r:
         print(f"branch: {r.get('branch')}  tests: {'PASS' if r.get('tests_passed') else 'FAIL'}")
         for s in r.get("subtasks", []):
