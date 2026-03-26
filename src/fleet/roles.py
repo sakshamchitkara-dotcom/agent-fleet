@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-READ_ONLY = ("read_file", "list_dir", "grep", "run_tests")
-ALL_TOOLS = ("read_file", "list_dir", "grep", "write_file", "apply_patch",
+READ_ONLY = ("repo_map", "search_symbols", "read_file", "list_dir", "grep", "run_tests")
+ALL_TOOLS = ("repo_map", "search_symbols", "read_file", "list_dir", "grep", "write_file", "apply_patch",
              "run_command", "run_tests", "git_diff")
 
 _str = {"type": "string"}
@@ -14,9 +14,10 @@ COMMON = """You are an autonomous software engineer working inside a git worktre
 repository. Paths are relative to the repository root. Commands run in a sandbox with no \
 network access. You cannot push, open PRs or touch .git; the orchestrator handles that.
 
-Work like a careful senior engineer: read the relevant code before changing it, make the \
-smallest change that fully solves the problem at its root cause, follow the existing style, \
-and verify with the test suite. Do not modify tests to make them pass unless the task is \
+Orient yourself with `repo_map` and `search_symbols` before reading files one by one; they \
+show where every function and class lives. Work like a careful senior engineer: read the \
+relevant code before changing it, make the smallest change that fully solves the problem at \
+its root cause, follow the existing style, and verify with the test suite. Do not modify tests to make them pass unless the task is \
 about the tests themselves. When you are done, call the `finish` tool - that is the only way \
 your work is recorded."""
 

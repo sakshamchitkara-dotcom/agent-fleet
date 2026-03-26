@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from fleet.index import index, repo_map, search_symbols
+from fleet.tools import ToolError, Toolbox
 
 PY = '''"""mod"""
 MAX_ITEMS = 10
@@ -82,3 +83,12 @@ def test_search_symbols(tree):
     assert "no symbols" in search_symbols(tree, "nope_xyz")
     assert search_symbols(tree, "Cart.(") == "no symbols match 'Cart.('"  # bad regex: substring, no crash
 
+
+def test_toolbox_exposes_index_tools(tree):
+    tb = Toolbox(tree)
+    assert "apply_discount" in tb.execute("repo_map", {})
+    assert "apply_discount" in tb.execute("search_symbols", {"query": "discount"})
+    with pytest.raises(ToolError):
+        tb.execute("repo_map", {"path": "../"})
+    with pytest.raises(ToolError):
+        tb.execute("search_symbols", {"query": " "})
