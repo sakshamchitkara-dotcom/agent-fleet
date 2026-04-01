@@ -13,11 +13,12 @@ def test_run_status_logs(repo, tmp_path, capsys):
     out = capsys.readouterr().out
     assert ": done (finished)" in out and "tests: PASS" in out and "[approve] Fix add" in out
     assert "tokens: " in out and "worker-1 " in out
-    assert "sandbox: " in out
+    assert "sandbox: " in out and "cost: $0.0" in out and "est." in out
     tid = out.split("task ")[1].split()[0]
 
     main(["--home", home, "status"])
-    assert tid in capsys.readouterr().out
+    listing = capsys.readouterr().out
+    assert tid in listing and "COST" in listing and "$0.0" in listing
 
     main(["--home", home, "logs", tid, "--agent", "worker-1", "--follow"])  # task done: returns
     logs = capsys.readouterr().out
