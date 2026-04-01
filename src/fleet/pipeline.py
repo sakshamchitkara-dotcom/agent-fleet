@@ -31,6 +31,7 @@ class TaskSpec:
     review_rounds: int = 2
     budget: Budget = field(default_factory=Budget)
     task_tokens: int | None = None  # shared across all agents of the task
+    max_cost: float | None = None   # USD, shared across all agents; hard stop
 
 
 class Pipeline:
@@ -45,7 +46,7 @@ class Pipeline:
         self.repo: Path | None = None
         self.base = ""
         self._integrator_runs = 0
-        self.meter = TokenMeter(spec.task_tokens)
+        self.meter = TokenMeter(spec.task_tokens, spec.max_cost)
 
     # -- helpers ----------------------------------------------------------
     def branch(self, suffix: str = "") -> str:
@@ -76,7 +77,7 @@ class Pipeline:
         for b in integration["merged"]:  # history lives on in the merge commits of fleet/<task>
             git(self.repo, "branch", "-D", b, check=False)
         return {"repo": str(self.repo), "base": self.base, "plan": plan, "subtasks": work, **integration,
-                "tokens": {"total": self.meter.used, "by_agent": self.meter.by_agent}}
+                "tokens": self.meter.report()}
 
     def plan(self) -> tuple[list[dict], str]:
         self.progress("planning")

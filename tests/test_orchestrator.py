@@ -67,3 +67,12 @@ def test_spec_for_maps_options():
     spec = spec_for({"id": "abc", "repo": "o/r", "text": "t", "options": {
         "image": "myproj:test", "sandbox": "docker", "max_turns": 7, "task_tokens": 1000}})
     assert (spec.image, spec.sandbox, spec.budget.max_turns, spec.task_tokens) == ("myproj:test", "docker", 7, 1000)
+
+
+def test_budget_exhaustion_is_the_reported_error(repo, tmp_path):
+    q, opts = setup(tmp_path)
+    tid = q.submit(str(repo), "fix add", max_cost=0.000001, **opts)
+    Orchestrator(tmp_path / "home", q).run(drain=True, poll=0.05)
+    t = q.get(tid)
+    assert t["status"] == "failed" and t["error"].startswith("task budget exhausted")
+    assert "of $0.00" in t["error"]
