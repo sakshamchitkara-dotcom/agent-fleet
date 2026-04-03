@@ -72,15 +72,18 @@ class Orchestrator:
 
     def run_task(self, task: dict) -> None:
         tid = task["id"]
+        pipe = Pipeline(spec_for(task), models_for(task), self.home,
+                        lambda stage: self.queue.update(tid, stage=stage))
         try:
-            result = Pipeline(spec_for(task), models_for(task), self.home,
-                              lambda stage: self.queue.update(tid, stage=stage)).run()
+            result = pipe.run()
         except Exception as e:
             if permanent(e):  # e.g. 400/401/403/404 from the API: retrying cannot help
                 self.queue.update(tid, status="failed", error=traceback.format_exc())
                 status = "failed"
-            else:
+            else:  # a retry resumes from the agents' checkpoints
                 status = self.queue.fail(tid, traceback.format_exc())
+            if status == "failed":
+                pipe.cleanup()
             log.exception("task %s crashed; now %s", tid, status)
             return
         success = bool(result["branch"]) and result["tests_passed"]

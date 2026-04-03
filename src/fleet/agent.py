@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from dataclasses import dataclass, field
 
 from . import pricing
 from .roles import Role
 from .tools import Toolbox, ToolError
-from .trajectory import Trajectory
+from .trajectory import Trajectory, read
 
 MAX_RESULT_CHARS = 30_000
 TYPES = {"string": str, "integer": int, "boolean": bool, "array": list, "object": dict}
@@ -89,7 +90,7 @@ def validate(args, schema: dict) -> str | None:
 
 class Agent:
     def __init__(self, name: str, role: Role, model, toolbox: Toolbox, trajectory: Trajectory,
-                 budget: Budget | None = None, meter: TokenMeter | None = None):
+                 budget: Budget | None = None, meter: TokenMeter | None = None, resume: bool = True):
         self.name = name
         self.system = role.system
         self.model = model
@@ -99,15 +100,28 @@ class Agent:
         self.meter = meter or TokenMeter()
         self.tools = toolbox.schemas(role.finish_schema, role.finish_description, role.tools)
         self.schemas = {t["name"]: t["input_schema"] for t in self.tools}
+        self.resume = resume
+        self.ckpt = trajectory.path.with_suffix(".ckpt.json")
 
     def run(self, task: str) -> AgentResult:
+        if self.resume and (done := self._finished_before()):
+            return done
         messages: list[dict] = [{"role": "user", "content": task}]
-        tokens, cost = 0, 0.0
+        tokens, cost, first = 0, 0.0, 1
         model_id = getattr(self.model, "model", None)
-        self.log.log("start", task=task, model=getattr(self.model, "model", type(self.model).__name__),
-                     sandbox=self.toolbox.sandbox.mode,
-                     isolation=self.toolbox.sandbox.isolation, tools=[t["name"] for t in self.tools])
-        for turn in range(1, self.budget.max_turns + 1):
+        if self.resume and self.ckpt.exists():
+            state = json.loads(self.ckpt.read_text())
+            messages, tokens, cost, first = state["messages"], state["tokens"], state["cost"], state["turn"] + 1
+            self.meter.charge(self.name, tokens, cost)
+            if hasattr(self.model, "resume"):
+                self.model.resume(state["turn"])
+            self.log.log("resume", turn=state["turn"], tokens=tokens, cost=cost)
+        else:
+            self.ckpt.unlink(missing_ok=True)
+            self.log.log("start", task=task, model=getattr(self.model, "model", type(self.model).__name__),
+                         sandbox=self.toolbox.sandbox.mode,
+                         isolation=self.toolbox.sandbox.isolation, tools=[t["name"] for t in self.tools])
+        for turn in range(first, self.budget.max_turns + 1):
             if tokens >= self.budget.max_tokens:
                 return self._end("budget_exhausted", turn - 1, tokens, cost, reason="token budget")
             if self.meter.exhausted:
@@ -127,6 +141,7 @@ class Agent:
             if not reply.tool_uses:
                 messages.append({"role": "user", "content":
                                  "Continue. Use the tools to make progress, and call `finish` when done."})
+                self._checkpoint(turn, tokens, cost, messages)
                 continue
 
             results, finished = [], None
@@ -141,6 +156,7 @@ class Agent:
                 return self._end("finished", turn, tokens, cost, output=finished)
             if reply.usage.get("input_tokens", 0) >= self.budget.compact_at:
                 messages = self._compact(task, messages)
+            self._checkpoint(turn, tokens, cost, messages)
         return self._end("budget_exhausted", self.budget.max_turns, tokens, cost, reason="turn budget")
 
     def _call(self, tu: dict, truncated: bool) -> tuple[str, bool]:
@@ -165,6 +181,26 @@ class Agent:
         self.log.log("tool", name=name, input=args, is_error=err, output=text[:4000])
         return text, err
 
+    def _checkpoint(self, turn: int, tokens: int, cost: float, messages: list[dict]) -> None:
+        """Full conversation (thinking signatures included) after each completed turn, written
+        atomically, so a restarted orchestrator continues the same conversation append-only."""
+        tmp = self.ckpt.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"turn": turn, "tokens": tokens, "cost": cost, "messages": messages}))
+        os.replace(tmp, self.ckpt)
+
+    def _finished_before(self) -> AgentResult | None:
+        """The result of this agent's last run if it already ended (replayed, not re-run)."""
+        if not self.log.path.exists():
+            return None
+        events = read(self.log.path)
+        starts = [i for i, e in enumerate(events) if e["event"] == "start"]
+        end = next((e for e in events[starts[-1] if starts else 0:] if e["event"] == "end"), None)
+        if end is None:
+            return None
+        self.meter.charge(self.name, end.get("tokens", 0), end.get("cost", 0.0))
+        return AgentResult(end["status"], end.get("output") or {}, end.get("turns", 0),
+                           end.get("tokens", 0), end.get("cost", 0.0))
+
     def _compact(self, task: str, messages: list[dict]) -> list[dict]:
         """Simple compaction: replace the whole history with a summary.
 
@@ -179,6 +215,7 @@ class Agent:
 
     def _end(self, status: str, turns: int, tokens: int, cost: float, output: dict | None = None,
              **extra) -> AgentResult:
+        self.ckpt.unlink(missing_ok=True)
         self.log.log("end", status=status, turns=turns, tokens=tokens, cost=round(cost, 6),
                      output=output, **extra)
         return AgentResult(status, output or {}, turns, tokens, cost)

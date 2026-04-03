@@ -37,7 +37,8 @@ def test_single_worker_happy_path(repo, tmp_path):
     assert not (tmp_path / "home" / "worktrees" / "t1" / "worker-1").exists()  # cleaned up
     assert git(repo, "branch", "--list", "fleet/*").split() == ["fleet/t1"]  # merged branch deleted
     runs = tmp_path / "home" / "runs" / "t1"
-    assert {p.stem for p in runs.iterdir()} == {"planner", "worker-1", "reviewer-1"}
+    assert {p.stem for p in runs.glob("*.jsonl")} == {"planner", "worker-1", "reviewer-1"}
+    assert not list(runs.glob("*.ckpt.json"))  # checkpoints are dropped once an agent ends
     assert read(runs / "worker-1.jsonl")[-1]["status"] == "finished"
 
 

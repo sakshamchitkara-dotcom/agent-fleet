@@ -167,6 +167,8 @@ def describe(e: dict) -> str:
         return f"~ turn {e['turn']} ({e['stop_reason']}) {text[:120]}".rstrip()
     if kind == "end":
         return f"= {e['status']} after {e['turns']} turns, {e['tokens']} tokens, {usd(e.get('cost', 0))}"
+    if kind == "resume":
+        return f"+ resumed from checkpoint after turn {e['turn']}"
     if kind == "start":
         return f"+ start: {e['task'].splitlines()[0][:100]}"
     return f"# {kind}"
