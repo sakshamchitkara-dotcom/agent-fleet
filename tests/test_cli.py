@@ -37,3 +37,20 @@ def test_local_repo_stored_as_absolute_path(repo, tmp_path, monkeypatch, capsys)
     main(["--home", str(tmp_path / "h"), "submit", ".", "x"])
     tid = capsys.readouterr().out.strip()
     assert Queue(tmp_path / "h" / "fleet.db").get(tid)["repo"] == str(repo.resolve())
+
+
+def test_retry_starts_fresh(repo, tmp_path, capsys):
+    from fleet.queue import Queue
+    home = tmp_path / "home"
+    q = Queue(home / "fleet.db")
+    tid = q.submit(str(repo), "x")
+    q.update(tid, status="failed")
+    runs = home / "runs" / tid
+    runs.mkdir(parents=True)
+    (runs / "worker-1.jsonl").write_text('{"event": "end"}\n')
+    (runs / "worker-1.ckpt.json").write_text("{}")
+    main(["--home", str(home), "retry", tid])
+    assert "requeued" in capsys.readouterr().out
+    assert not list(runs.glob("*.json*"))
+    assert len(list(runs.glob("attempt-*/worker-1.jsonl"))) == 1
+    assert q.get(tid)["status"] == "queued"
