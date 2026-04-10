@@ -1,0 +1,2 @@
+{"task": "median() is wrong for even-length input: median([4, 1, 3, 2]) returns 3 instead of 2.5.",
+ "test_cmd": "python -m unittest"}

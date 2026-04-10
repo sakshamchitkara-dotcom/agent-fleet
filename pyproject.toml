@@ -20,5 +20,8 @@ fleet = "fleet.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+fleet = ["bench/cases/**/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

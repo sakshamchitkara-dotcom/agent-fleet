@@ -1,0 +1,31 @@
+from fleet import bench
+from fleet.tools import git
+
+
+def test_every_case_starts_red(tmp_path):
+    import subprocess
+    import sys
+    for case in bench.case_names():
+        repo = bench.seed_repo(case, tmp_path / case)
+        r = subprocess.run([sys.executable, "-m", "unittest"], cwd=repo, capture_output=True)
+        assert r.returncode != 0, f"{case} has no failing test"
+
+
+def test_scripted_bench_passes_and_reports(tmp_path):
+    results = bench.run(["median", "bank"], "scripted", tmp_path, sandbox="subprocess")
+    assert [r.case for r in results] == ["median", "bank"]
+    assert all(r.passed and r.status == "done" for r in results), results
+    bank = results[1]
+    assert bank.turns >= 10 and bank.tokens > 0 and bank.cost > 0  # planner + 2 workers + 2 reviews
+    out = bench.report(results, "scripted")
+    assert "pass rate 2/2 (100%)" in out and "simulated" in out
+    assert '"pass_rate": 1.0' in bench.as_json(results, "scripted")
+
+
+def test_verify_rejects_edited_tests_and_missing_branch(tmp_path):
+    repo = bench.seed_repo("paginate", tmp_path / "p")
+    assert bench.verify(repo, None, "python -m unittest") == (False, "no branch produced")
+    git(repo, "checkout", "-q", "-b", "cheat")
+    (repo / "tests" / "test_pager.py").write_text("")
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "delete tests")
+    assert bench.verify(repo, "cheat", "python -m unittest") == (False, "tests were modified")

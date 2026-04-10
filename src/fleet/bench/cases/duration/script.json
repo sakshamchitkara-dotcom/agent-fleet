@@ -1,0 +1,14 @@
+{
+  "planner": [
+    [{"name": "search_symbols", "input": {"query": "duration|_UNIT"}}],
+    [{"name": "finish", "input": {"summary": "Minute multiplier is 6 instead of 60.", "subtasks": [
+      {"title": "Fix minute multiplier", "description": "In duration.py, _UNIT maps 'm' to 6; a minute is 60 seconds."}]}}]
+  ],
+  "worker": [
+    [{"name": "read_file", "input": {"path": "duration.py"}}],
+    [{"name": "apply_patch", "input": {"path": "duration.py", "old": "\"m\": 6,", "new": "\"m\": 60,"}}],
+    [{"name": "run_tests", "input": {}}],
+    [{"name": "finish", "input": {"summary": "A minute is 60 seconds.", "tests_passed": true}}]
+  ],
+  "reviewer": [[{"name": "finish", "input": {"verdict": "approve", "feedback": "Correct constant."}}]]
+}

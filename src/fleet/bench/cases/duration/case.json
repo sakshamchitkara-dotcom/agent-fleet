@@ -1,0 +1,2 @@
+{"task": "parse_duration('1h30m') returns 3780 instead of 5400; minutes are parsed wrong.",
+ "test_cmd": "python -m unittest"}

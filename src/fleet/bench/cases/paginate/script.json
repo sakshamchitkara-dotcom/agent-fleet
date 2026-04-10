@@ -1,0 +1,14 @@
+{
+  "planner": [
+    [{"name": "search_symbols", "input": {"query": "page"}}],
+    [{"name": "finish", "input": {"summary": "Off-by-one slice end in pager.page.", "subtasks": [
+      {"title": "Fix page slice", "description": "In pager.py, page() slices items[start:start + size - 1]; the end is exclusive so it must be start + size."}]}}]
+  ],
+  "worker": [
+    [{"name": "read_file", "input": {"path": "pager.py"}}],
+    [{"name": "apply_patch", "input": {"path": "pager.py", "old": "items[start:start + size - 1]", "new": "items[start:start + size]"}}],
+    [{"name": "run_tests", "input": {}}],
+    [{"name": "finish", "input": {"summary": "Slice end is exclusive; use start + size.", "tests_passed": true}}]
+  ],
+  "reviewer": [[{"name": "finish", "input": {"verdict": "approve", "feedback": "Correct root-cause fix."}}]]
+}
