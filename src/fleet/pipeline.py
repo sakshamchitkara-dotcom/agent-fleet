@@ -12,7 +12,7 @@ from .agent import Agent, AgentResult, Budget, TokenMeter
 from .roles import INTEGRATOR, PLANNER, REVIEWER, WORKER, Role
 from .sandbox import DEFAULT_IMAGE, Sandbox
 from .tools import Toolbox, diff, git
-from .trajectory import Trajectory
+from .trajectory import Trajectory, summarize
 from .workspace import add_worktree, commit_all, head, ident, prepare_repo, remove_worktree
 
 MAX_SUBTASKS = 4
@@ -90,7 +90,7 @@ class Pipeline:
         for b in integration["merged"]:  # history lives on in the merge commits of fleet/<task>
             git(self.repo, "branch", "-D", b, check=False)
         return {"repo": str(self.repo), "base": self.base, "plan": plan, "subtasks": work, **integration,
-                "tokens": self.meter.report()}
+                "tokens": self.meter.report(), "trajectory": summarize(self.runs)}
 
     def plan(self) -> tuple[list[dict], str]:
         self.progress("planning")

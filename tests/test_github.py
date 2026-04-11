@@ -73,3 +73,22 @@ def test_pr_body_links_issue_and_title_cut_at_word():
     t = short_title("Fix #1: Discounts are inverted: apply_discount returns the discount instead of the price")
     assert len(t) <= 72 and t.endswith("...") and not t.endswith(" ...")
     assert t == "Fix #1: Discounts are inverted: apply_discount returns the discount..."
+
+
+def test_pr_body_has_trajectory_summary_and_test_output(repo, tmp_path):
+    import json as _json
+
+    from fleet.models import ModelFactory
+    from fleet.pipeline import Pipeline, TaskSpec
+    from tests.test_orchestrator import FIX_SCRIPT
+    p = tmp_path / "s.json"
+    p.write_text(_json.dumps(FIX_SCRIPT))
+    spec = TaskSpec("t1", str(repo), "fix add", test_cmd="python3 -m unittest -v", sandbox="subprocess")
+    result = Pipeline(spec, ModelFactory("scripted", script=p), tmp_path / "home").run()
+    agents = [a["agent"] for a in result["trajectory"]]
+    assert agents == ["planner", "worker-1", "reviewer-1"]
+    body = pr_body({"id": "t1", "text": "fix add"}, result)
+    assert "## Trajectory" in body and "| worker-1 | finished | 2 | 2 |" in body
+    assert "worker-1**: apply_patch -> finish" in body and "_ok_" in body  # reviewer feedback
+    assert "test_add (test_calc.CalcTest" in body and "PASSING" in body
+    assert "estimated" in body

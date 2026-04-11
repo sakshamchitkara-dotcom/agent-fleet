@@ -62,14 +62,34 @@ def pr_body(task: dict, result: dict) -> str:
         last = s["rounds"][-1]["summary"] if s.get("rounds") else ""
         lines.append(f"- **{s['title']}** - review: `{s['verdict']}`, "
                      f"{len(s.get('rounds', []))} round(s). {last}".rstrip())
+    if result.get("trajectory"):
+        lines += ["", "## Trajectory", "",
+                  "| agent | outcome | turns | tool calls | tokens | est. cost |",
+                  "|---|---|---:|---:|---:|---:|"]
+        for a in result["trajectory"]:
+            errs = f" ({a['tool_errors']} failed)" if a["tool_errors"] else ""
+            lines.append(f"| {a['agent']} | {a['status']}{' (resumed)' if a['resumed'] else ''} | "
+                         f"{a['turns']} | {a['tool_calls']}{errs} | {a['tokens']:,} | ${a['cost']:.4f} |")
+        lines += ["", "<details><summary>Steps per agent</summary>", ""]
+        for a in result["trajectory"]:
+            steps = " -> ".join(a["steps"]) or "(no tool calls)"
+            report = f"<br>_{_one_line(a['report'])}_" if a["report"] else ""
+            lines.append(f"- **{a['agent']}**: {steps}{report}")
+        lines += ["", "</details>"]
     lines += ["", "## Changes", "", "```", result.get("diffstat", ""), "```", "",
               f"## Tests: {'PASSING' if result.get('tests_passed') else 'FAILING'}", "",
               "```", result.get("test_output", "")[-2500:].strip(), "```", "",
               f"_Opened by agent-fleet (task `{task['id']}`, "
-              f"{result.get('tokens', {}).get('total', 0):,} tokens)._"]
+              f"{result.get('tokens', {}).get('total', 0):,} tokens, "
+              f"~${result.get('tokens', {}).get('cost_usd', 0):.4f} estimated)._"]
     if task.get("options", {}).get("issue"):
         lines += ["", f"Closes #{task['options']['issue']}"]
     return "\n".join(lines)
+
+
+def _one_line(text: str, limit: int = 300) -> str:
+    text = " ".join(text.split()).replace("|", "\\|")
+    return text if len(text) <= limit else text[:limit - 3] + "..."
 
 
 def open_pr(repo_path: Path, owner: str, repo: str, branch: str, title: str, body: str, run=gh) -> str:
