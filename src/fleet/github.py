@@ -37,6 +37,15 @@ def fetch_issue(owner: str, repo: str, number: int, run=gh) -> dict:
     return {"title": data["title"], "body": data.get("body") or "", "url": data["html_url"]}
 
 
+def labeled_issues(owner: str, repo: str, label: str, run=gh) -> list[dict]:
+    """Open issues (not PRs) carrying `label`, oldest first."""
+    from urllib.parse import quote
+    data = json.loads(run("api", f"repos/{owner}/{repo}/issues?state=open&per_page=100&sort=created"
+                                 f"&direction=asc&labels={quote(label)}"))
+    return [{"number": i["number"], "title": i["title"], "body": i.get("body") or "", "url": i["html_url"]}
+            for i in data if "pull_request" not in i]
+
+
 def issue_task_text(owner: str, repo: str, number: int, issue: dict) -> str:
     return (f"Resolve GitHub issue {owner}/{repo}#{number}: {issue['title']}\n\n"
             f"{issue['body']}\n\n(Issue URL: {issue['url']})")
