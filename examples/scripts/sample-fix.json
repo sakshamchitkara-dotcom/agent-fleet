@@ -1,7 +1,7 @@
 {
   "planner": [
     [{"text": "Let me look at the layout and the failing tests."},
-     {"name": "list_dir", "input": {"path": "."}},
+     {"name": "repo_map", "input": {}},
      {"name": "run_tests", "input": {}}],
     [{"name": "read_file", "input": {"path": "shop/pricing.py"}},
      {"name": "read_file", "input": {"path": "shop/text.py"}}],
