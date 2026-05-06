@@ -22,9 +22,13 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install bubblewrap (Linux jail for the subprocess sandbox)
         run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends bubblewrap
+      - name: Allow unprivileged user namespaces (Ubuntu 24.04's AppArmor default blocks bwrap)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: pip install -e '.[dev]'
       - name: Report the subprocess sandbox isolation on this runner
-        run: python -c "from fleet.sandbox import Sandbox; print(Sandbox('.', mode='subprocess').isolation)"
+        run: |
+          python -c "from fleet.sandbox import Sandbox; print(Sandbox('.', mode='subprocess').isolation)" | tee isolation.txt
+          grep -q '^bwrap:' isolation.txt
       - name: Unit + end-to-end tests (scripted backend, no API key)
         run: pytest -q
       - name: Docker sandbox test
