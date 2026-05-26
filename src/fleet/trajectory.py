@@ -30,12 +30,12 @@ def isolation(runs: str | Path) -> str:
 
 
 def spend(runs: str | Path) -> dict[str, dict]:
-    """Live tokens and USD per agent, summed from model events (works mid-run)."""
+    """Live tokens and USD per agent, summed from model and compaction calls (works mid-run)."""
     out: dict[str, dict] = {}
     for f in sorted(Path(runs).glob("*.jsonl")):
         agg = out.setdefault(f.stem, {"tokens": 0, "cost": 0.0})
         for e in read(f):
-            if e.get("event") == "model":
+            if e.get("event") in ("model", "compact"):
                 u = e.get("usage", {})
                 agg["tokens"] += u.get("input_tokens", 0) + u.get("output_tokens", 0)
                 agg["cost"] += e.get("cost", 0.0)

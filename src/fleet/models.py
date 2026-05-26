@@ -59,18 +59,11 @@ class ClaudeModel:
             cache_control={"type": "ephemeral"},  # cache the growing conversation prefix
         ) as stream:
             msg = stream.get_final_message()
-        u = msg.usage
-        return Reply(
-            content=[b.to_dict() for b in msg.content],
-            stop_reason=msg.stop_reason,
-            usage={"input_tokens": u.input_tokens + (u.cache_read_input_tokens or 0)
-                   + (u.cache_creation_input_tokens or 0),
-                   "output_tokens": u.output_tokens,
-                   "cache_read_input_tokens": u.cache_read_input_tokens or 0,
-                   "cache_creation_input_tokens": u.cache_creation_input_tokens or 0},
-        )
+        return Reply(content=[b.to_dict() for b in msg.content], stop_reason=msg.stop_reason,
+                     usage=_usage(msg.usage))
 
-    def summarize(self, transcript: str) -> str:
+    def summarize(self, transcript: str) -> tuple[str, dict]:
+        """Working notes for compaction, plus the call's usage so it is priced like any turn."""
         msg = self.client.messages.create(
             model=self.model,
             max_tokens=8_000,
@@ -79,7 +72,14 @@ class ClaudeModel:
             system="You compress coding-agent transcripts into working notes.",
             messages=[{"role": "user", "content": SUMMARY_PROMPT + transcript}],
         )
-        return "\n".join(b.text for b in msg.content if b.type == "text")
+        return "\n".join(b.text for b in msg.content if b.type == "text"), _usage(msg.usage)
+
+
+def _usage(u) -> dict:
+    """SDK usage -> dict whose `input_tokens` is the whole prompt (cached parts included)."""
+    read, written = u.cache_read_input_tokens or 0, u.cache_creation_input_tokens or 0
+    return {"input_tokens": u.input_tokens + read + written, "output_tokens": u.output_tokens,
+            "cache_read_input_tokens": read, "cache_creation_input_tokens": written}
 
 
 SUMMARY_PROMPT = (
@@ -131,9 +131,10 @@ class ScriptedModel:
         stop = "tool_use" if any(b["type"] == "tool_use" for b in blocks) else "end_turn"
         return Reply(blocks, stop, {"input_tokens": in_tok, "output_tokens": out_tok})
 
-    def summarize(self, transcript: str) -> str:
+    def summarize(self, transcript: str) -> tuple[str, dict]:
         self.summaries += 1
-        return f"[scripted summary #{self.summaries}] {len(transcript)} chars of history compacted."
+        text = f"[scripted summary #{self.summaries}] {len(transcript)} chars of history compacted."
+        return text, {"input_tokens": len(transcript) // 4, "output_tokens": len(text) // 4}
 
 
 def _exhausted_finish(tools: list[dict]) -> dict:
