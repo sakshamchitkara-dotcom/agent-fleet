@@ -152,25 +152,48 @@ def _exhausted_finish(tools: list[dict]) -> dict:
     return out
 
 
+PROVIDERS = ("anthropic", "bedrock", "vertex")
+
+
+def make_client(provider: str = "anthropic"):
+    """The SDK's own client per platform; each reads its usual environment (API key or
+    `ant` profile; AWS_REGION + AWS credentials; ANTHROPIC_VERTEX_PROJECT_ID + CLOUD_ML_REGION)."""
+    import anthropic
+    if provider == "bedrock":
+        return anthropic.AnthropicBedrockMantle()
+    if provider == "vertex":
+        return anthropic.AnthropicVertex()
+    return anthropic.Anthropic()
+
+
+def provider_model(provider: str, model: str) -> str:
+    """Bedrock IDs carry an `anthropic.` prefix; Vertex and first-party IDs are bare."""
+    if provider == "bedrock" and "anthropic." not in model:
+        return f"anthropic.{model}"
+    return model
+
+
 class ModelFactory:
     """Creates one model instance per agent name (scripted cursors are per agent)."""
 
     def __init__(self, backend: str = "claude", script: str | Path | None = None,
-                 model: str = DEFAULT_MODEL, effort: str = "high"):
+                 model: str = DEFAULT_MODEL, effort: str = "high", provider: str = "anthropic"):
+        if backend not in ("claude", "scripted"):
+            raise ValueError(f"unknown backend {backend!r}")
+        if provider not in PROVIDERS:
+            raise ValueError(f"unknown provider {provider!r}")
         self.backend = backend
-        self.model = model
+        self.provider = provider
+        self.model = provider_model(provider, model)
         self.effort = effort
         self._script = json.loads(Path(script).read_text()) if script else {}
         self._lock = threading.Lock()
         self._client = None
-        if backend not in ("claude", "scripted"):
-            raise ValueError(f"unknown backend {backend!r}")
 
     def __call__(self, agent: str):
         if self.backend == "scripted":
             return ScriptedModel(self._script, agent)
         with self._lock:
             if self._client is None:
-                import anthropic
-                self._client = anthropic.Anthropic()
+                self._client = make_client(self.provider)
         return ClaudeModel(self.model, self.effort, client=self._client)

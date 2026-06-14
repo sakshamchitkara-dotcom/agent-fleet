@@ -89,3 +89,24 @@ def test_exhausted_script_emits_schema_valid_finish():
         assert validate(call["input"], role.finish_schema) is None
         if role.name == "reviewer":
             assert call["input"]["verdict"] == "request_changes"
+
+
+def test_factory_builds_bedrock_and_vertex_clients(monkeypatch):
+    import anthropic
+    import pytest
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    m = ModelFactory("claude", provider="bedrock")("worker-1")
+    assert isinstance(m.client, anthropic.AnthropicBedrockMantle) and m.model == "anthropic.claude-opus-5-5"
+    assert "bedrock-mantle.us-east-1" in str(m.client.base_url)
+    assert ModelFactory("claude", model="us.anthropic.claude-opus-5-5", provider="bedrock").model \
+        == "us.anthropic.claude-opus-5-5"  # inference profiles are passed through
+    monkeypatch.setenv("ANTHROPIC_VERTEX_PROJECT_ID", "proj")
+    monkeypatch.setenv("CLOUD_ML_REGION", "global")
+    v = ModelFactory("claude", provider="vertex")
+    v._client = anthropic.AnthropicVertex(access_token="test")  # no ADC on test machines
+    m = v("worker-1")
+    assert m.model == "claude-opus-5-5" and m.client.project_id == "proj"
+    with pytest.raises(ValueError):
+        ModelFactory("claude", provider="azure")
