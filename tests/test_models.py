@@ -66,6 +66,9 @@ def test_claude_request_shape_and_verbatim_content():
     assert kw["output_config"] == {"effort": "high"}
     assert "tool_choice" not in kw  # forced tool_choice is rejected on Opus 5.5
     assert kw["tools"][0]["eager_input_streaming"] is True
+    # two cache points: the static tools+system prefix, and the conversation tail (top-level)
+    assert kw["system"] == [{"type": "text", "text": "sys", "cache_control": {"type": "ephemeral"}}]
+    assert kw["cache_control"] == {"type": "ephemeral"}
     assert r.content[0] == {"type": "thinking", "thinking": "", "signature": "sig123"}
     assert r.tool_uses[0]["input"] == {"path": "a.py"}
     assert r.usage["input_tokens"] == 110

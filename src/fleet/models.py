@@ -51,12 +51,16 @@ class ClaudeModel:
         with self.client.messages.stream(
             model=self.model,
             max_tokens=self.max_tokens,
-            system=system,
+            # Explicit breakpoint on the static prefix (tools render before system, so this
+            # caches both): every agent of the same role - parallel workers, revision rounds,
+            # post-compaction contexts - reads it instead of paying for it again. The top-level
+            # marker caches the growing conversation on top of it.
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             tools=tools,
             messages=messages,
             thinking={"type": "adaptive"},
             output_config={"effort": self.effort},
-            cache_control={"type": "ephemeral"},  # cache the growing conversation prefix
+            cache_control={"type": "ephemeral"},
         ) as stream:
             msg = stream.get_final_message()
         return Reply(content=[b.to_dict() for b in msg.content], stop_reason=msg.stop_reason,
