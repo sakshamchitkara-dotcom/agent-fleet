@@ -66,8 +66,22 @@ class ClaudeModel:
         return Reply(content=[b.to_dict() for b in msg.content], stop_reason=msg.stop_reason,
                      usage=_usage(msg.usage))
 
-    def summarize(self, transcript: str) -> tuple[str, dict]:
-        """Working notes for compaction, plus the call's usage so it is priced like any turn."""
+    def summarize(self, system: str, messages: list[dict], tools: list[dict]) -> tuple[str, dict]:
+        """Working notes for compaction, plus the call's usage so it is priced like any turn.
+
+        The request is the agent's own next request (same model, system, tools, effort and
+        history, thinking blocks included) with one instruction appended, so the whole
+        conversation is a cache read instead of fresh input. Should the model answer with
+        tool calls only, it falls back to summarizing a rendered transcript.
+        """
+        from .agent import render_transcript
+        reply = self.complete(system, [*messages, {"role": "user", "content": COMPACT_PROMPT}], tools)
+        if reply.text.strip():
+            return reply.text, reply.usage
+        text, usage = self._summarize_transcript(render_transcript(messages))
+        return text, {k: reply.usage.get(k, 0) + usage.get(k, 0) for k in usage}
+
+    def _summarize_transcript(self, transcript: str) -> tuple[str, dict]:
         msg = self.client.messages.create(
             model=self.model,
             max_tokens=8_000,
@@ -85,6 +99,13 @@ def _usage(u) -> dict:
     return {"input_tokens": u.input_tokens + read + written, "output_tokens": u.output_tokens,
             "cache_read_input_tokens": read, "cache_creation_input_tokens": written}
 
+
+COMPACT_PROMPT = (
+    "Your context is about to be reset. Do not call any tools now. Reply with working notes "
+    "that let you continue from a fresh context: the task, files inspected and what matters in "
+    "them, every edit made (path + what changed), the latest test results, open hypotheses, and "
+    "the next step. Be concrete (paths, function names, error messages)."
+)
 
 SUMMARY_PROMPT = (
     "Summarize this coding-agent transcript so the agent can continue from a fresh context. "
@@ -135,7 +156,9 @@ class ScriptedModel:
         stop = "tool_use" if any(b["type"] == "tool_use" for b in blocks) else "end_turn"
         return Reply(blocks, stop, {"input_tokens": in_tok, "output_tokens": out_tok})
 
-    def summarize(self, transcript: str) -> tuple[str, dict]:
+    def summarize(self, system: str, messages: list[dict], tools: list[dict]) -> tuple[str, dict]:
+        from .agent import render_transcript
+        transcript = render_transcript(messages)
         self.summaries += 1
         text = f"[scripted summary #{self.summaries}] {len(transcript)} chars of history compacted."
         return text, {"input_tokens": len(transcript) // 4, "output_tokens": len(text) // 4}

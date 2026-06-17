@@ -76,39 +76,48 @@ def test_thinking_replayed_verbatim_and_results_batched(repo, tmp_path):
     assert all(r["model"] == "claude-opus-5-5" and "tool_choice" not in r for r in client.requests)
 
 
-def test_compaction_uses_summary_in_fresh_context(repo, tmp_path):
+def test_compaction_forks_the_cached_conversation(repo, tmp_path):
+    notes = msg([THINK, {"type": "text", "text": "SUMMARY: listed the repo"}], stop="end_turn", inp=600)
     client = FakeClient([
         msg([THINK, {"type": "tool_use", "id": "t1", "name": "list_dir", "input": {"path": "."}}], inp=500),
-        msg([{"type": "tool_use", "id": "t2", "name": "finish",
-              "input": {"summary": "done", "tests_passed": False}}]),
-    ], summary="SUMMARY: listed the repo")
-    agent = Agent("worker-1", WORKER, ClaudeModel(client=client), Toolbox(repo),
-                  Trajectory(tmp_path / "t.jsonl", "worker-1"), Budget(compact_at=400))
-    assert agent.run("the task").ok
-    fresh = client.requests[1]["messages"]
-    assert len(fresh) == 1 and "SUMMARY: listed the repo" in fresh[0]["content"]
-    assert "sig-abc" not in str(fresh)  # no earlier thinking replayed after compaction
-    s = client.summary_requests[0]
-    assert s["model"] == "claude-opus-5-5" and s["thinking"] == {"type": "adaptive"}
-    assert "TOOL CALL list_dir" in s["messages"][0]["content"]
-
-
-def test_compaction_call_is_charged(repo, tmp_path):
-    from fleet.pricing import cost
-    from fleet.trajectory import read, spend
-    client = FakeClient([
-        msg([{"type": "tool_use", "id": "t1", "name": "list_dir", "input": {"path": "."}}], inp=500),
+        notes,
         msg([{"type": "tool_use", "id": "t2", "name": "finish",
               "input": {"summary": "done", "tests_passed": False}}]),
     ])
     agent = Agent("worker-1", WORKER, ClaudeModel(client=client), Toolbox(repo),
                   Trajectory(tmp_path / "t.jsonl", "worker-1"), Budget(compact_at=400))
+    assert agent.run("the task").ok
+    turn, fork, fresh = client.requests
+    # the summary request is the agent's next request plus one instruction: same prefix
+    assert fork["system"] == turn["system"] and fork["tools"] == turn["tools"]
+    assert fork["model"] == turn["model"] and fork["output_config"] == turn["output_config"]
+    assert fork["messages"][0] == turn["messages"][0] and len(fork["messages"]) == 4  # append-only
+    assert fork["messages"][1]["content"][0] == THINK and "Do not call any tools" in fork["messages"][-1]["content"]
+    assert not client.summary_requests  # no separate transcript call needed
+    assert len(fresh["messages"]) == 1 and "SUMMARY: listed the repo" in fresh["messages"][0]["content"]
+    assert "sig-abc" not in str(fresh["messages"])  # no earlier thinking replayed after compaction
+
+
+def test_compaction_falls_back_to_transcript_when_model_calls_tools(repo, tmp_path):
+    from fleet.pricing import cost
+    from fleet.trajectory import read, spend
+    client = FakeClient([
+        msg([{"type": "tool_use", "id": "t1", "name": "list_dir", "input": {"path": "."}}], inp=500),
+        msg([{"type": "tool_use", "id": "t9", "name": "list_dir", "input": {"path": "."}}], inp=600),
+        msg([{"type": "tool_use", "id": "t2", "name": "finish",
+              "input": {"summary": "done", "tests_passed": False}}]),
+    ], summary="NOTES")
+    agent = Agent("worker-1", WORKER, ClaudeModel(client=client), Toolbox(repo),
+                  Trajectory(tmp_path / "t.jsonl", "worker-1"), Budget(compact_at=400))
     res = agent.run("the task")
-    turns = cost("claude-opus-5-5", {"input_tokens": 500, "output_tokens": 20}) + \
-        cost("claude-opus-5-5", {"input_tokens": 100, "output_tokens": 20})
-    summary = cost("claude-opus-5-5", {"input_tokens": 100, "output_tokens": 20})
-    assert abs(res.cost - (turns + summary)) < 1e-9 and res.tokens == 640 + 120
+    s = client.summary_requests[0]
+    assert s["model"] == "claude-opus-5-5" and "TOOL CALL list_dir" in s["messages"][0]["content"]
+    assert "NOTES" in client.requests[2]["messages"][0]["content"]
+    # both summary attempts are charged: fork (600 in) + transcript call (100 in), 20 out each
+    summary = cost("claude-opus-5-5", {"input_tokens": 700, "output_tokens": 40})
+    turns = cost("claude-opus-5-5", {"input_tokens": 600, "output_tokens": 40})
+    assert abs(res.cost - (turns + summary)) < 1e-9 and res.tokens == 640 + 740
     assert abs(agent.meter.cost - res.cost) < 1e-9
     compact = next(e for e in read(tmp_path / "t.jsonl") if e["event"] == "compact")
-    assert compact["usage"]["input_tokens"] == 100 and compact["cost"] > 0
+    assert compact["usage"]["input_tokens"] == 700 and compact["cost"] > 0
     assert abs(spend(tmp_path)["t"]["cost"] - res.cost) < 1e-6
