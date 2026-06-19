@@ -92,3 +92,18 @@ def test_toolbox_exposes_index_tools(tree):
         tb.execute("repo_map", {"path": "../"})
     with pytest.raises(ToolError):
         tb.execute("search_symbols", {"query": " "})
+
+
+def test_unchanged_files_are_not_reparsed(tmp_path):
+    import os
+    from fleet import index
+    f = tmp_path / "m.py"
+    f.write_text("def a():\n    pass\n")
+    index._parse.cache_clear()
+    assert "def a" in index.search_symbols(tmp_path, "a")
+    index.search_symbols(tmp_path, "a")
+    assert index._parse.cache_info().hits >= 1 and index._parse.cache_info().misses == 1
+    f.write_text("def b():\n    pass\n")
+    os.utime(f, ns=(f.stat().st_atime_ns, f.stat().st_mtime_ns + 1_000_000))  # distinct mtime
+    assert "def b" in index.search_symbols(tmp_path, "b")  # the edit is seen
+    assert index._parse.cache_info().misses == 2
