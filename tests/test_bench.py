@@ -29,3 +29,17 @@ def test_verify_rejects_edited_tests_and_missing_branch(tmp_path):
     (repo / "tests" / "test_pager.py").write_text("")
     git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "delete tests")
     assert bench.verify(repo, "cheat", "python -m unittest") == (False, "tests were modified")
+
+
+def test_verify_accepts_added_regression_tests(tmp_path):
+    repo = bench.seed_repo("median", tmp_path / "m")
+    git(repo, "checkout", "-q", "-b", "fix")
+    stats = repo / "stats.py"
+    stats.write_text(stats.read_text().replace(
+        "    return s[mid]", "    if len(s) % 2 == 0:\n        return (s[mid - 1] + s[mid]) / 2\n    return s[mid]"))
+    (repo / "tests" / "test_regression.py").write_text(
+        "import unittest\nfrom stats import median\n\n\nclass R(unittest.TestCase):\n"
+        "    def test_pair(self):\n        self.assertEqual(median([1, 2]), 1.5)\n")
+    git(repo, "add", "-A")
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "fix + regression test")
+    assert bench.verify(repo, "fix", "python -m unittest") == (True, "")
