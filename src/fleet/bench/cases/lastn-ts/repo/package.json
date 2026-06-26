@@ -1,0 +1,7 @@
+{
+  "name": "lastn",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {"test": "node --test tests/lastn.test.ts"},
+  "engines": {"node": ">=22.18"}
+}

@@ -11,13 +11,20 @@ from fleet.tools import git
 
 
 NODE = shutil.which("node")
+# node >= 22.18 runs .ts files directly (type stripping)
+NODE_TS = bool(NODE) and subprocess.run([NODE, "-p", "process.features.typescript || ''"],
+                                        capture_output=True, text=True).stdout.strip() != ""
+
+
+def node_ok(case: str) -> bool:
+    return NODE_TS if case.endswith("-ts") else bool(NODE)
 
 
 @pytest.mark.parametrize("case", bench.case_names())
 def test_every_case_starts_red(tmp_path, case):
     spec = json.loads((bench.CASES / case / "case.json").read_text())
-    if spec["test_cmd"].startswith("node") and not NODE:
-        pytest.skip("node is not installed")
+    if spec["test_cmd"].startswith("node") and not node_ok(case):
+        pytest.skip("node (>= 22.18 for TypeScript) is not installed")
     repo = bench.seed_repo(case, tmp_path / case)
     r = subprocess.run(spec["test_cmd"], shell=True, cwd=repo, capture_output=True,
                        env={**os.environ, "PATH": os.path.dirname(sys.executable) + os.pathsep + os.environ["PATH"]})
@@ -26,7 +33,7 @@ def test_every_case_starts_red(tmp_path, case):
 
 @pytest.mark.skipif(not NODE, reason="node is not installed")
 def test_scripted_bench_fixes_the_node_cases(tmp_path):
-    cases = [c for c in bench.case_names() if c.endswith(("-js", "-ts"))]
+    cases = [c for c in bench.case_names() if c.endswith(("-js", "-ts")) and node_ok(c)]
     results = bench.run(cases, "scripted", tmp_path, sandbox="subprocess")
     assert cases and all(r.passed for r in results), results
 
