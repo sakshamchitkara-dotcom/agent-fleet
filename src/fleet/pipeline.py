@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -9,7 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from .agent import Agent, AgentResult, Budget, TokenMeter
-from .roles import INTEGRATOR, PLANNER, REVIEWER, WORKER, Role
+from .roles import INTEGRATOR, PLANNER, REVIEWER, TESTER, WORKER, Role
 from .sandbox import DEFAULT_IMAGE, Sandbox
 from .tools import Toolbox, diff, git
 from .trajectory import Trajectory, summarize
@@ -17,6 +18,11 @@ from .workspace import add_worktree, commit_all, head, ident, prepare_repo, remo
 
 MAX_SUBTASKS = 4
 CONFLICT = re.compile(r"^(<{7}|>{7})( |$)", re.M)
+TEST_PATH = re.compile(r"(^|/)(tests?|spec|__tests__)/|(^|/)test_[^/]*$|_test\.[^/]+$|\.(test|spec)\.[^/]+$")
+
+
+def is_test_path(path: str) -> bool:
+    return bool(TEST_PATH.search(path))
 
 
 @dataclass
@@ -32,6 +38,7 @@ class TaskSpec:
     budget: Budget = field(default_factory=Budget)
     task_tokens: int | None = None  # shared across all agents of the task
     max_cost: float | None = None   # USD, shared across all agents; hard stop
+    test_first: bool = False        # a tester adds a failing regression test before each fix
 
 
 class Pipeline:
@@ -109,6 +116,10 @@ class Pipeline:
         wt = add_worktree(self.repo, self.wt_root / name, branch, self.base, keep=self.started(name))
         prompt = (f"Overall task:\n{self.spec.text}\n\nYour subtask ({sub['title']}):\n"
                   f"{sub['description']}")
+        red = self.write_test(i, sub, wt) if self.spec.test_first else None
+        if red:
+            prompt += (f"\n\nA regression test that reproduces this was added first and fails on the "
+                       f"current code: {', '.join(red['files'])}. Make it pass without changing it.")
         rounds, verdict, feedback = [], "none", ""
         for rnd in range(1, self.spec.review_rounds + 2):  # first attempt + revisions
             agent_name = name if rnd == 1 else f"{name}.r{rnd}"
@@ -120,18 +131,44 @@ class Pipeline:
             if not diff(wt, self.base).strip():
                 verdict, feedback = "no_changes", "worker produced no changes"
                 break
-            verdict, feedback = self.review(i, rnd, wt, sub)
+            verdict, feedback = self.review(i, rnd, wt, sub, red)
             if verdict == "approve":
                 break
         return {"index": i, "title": sub["title"], "branch": branch, "verdict": verdict,
-                "feedback": feedback, "rounds": rounds}
+                "feedback": feedback, "rounds": rounds, "regression_test": red}
 
-    def review(self, i: int, rnd: int, wt: Path, sub: dict) -> tuple[str, str]:
+    def write_test(self, i: int, sub: dict, wt: Path) -> dict | None:
+        """Tester stage: a regression test committed on the worker's branch before any fix.
+
+        Kept only if it touches test files alone and those tests fail on the base code; otherwise
+        the commit is dropped and the worker starts from base as usual."""
+        saved = self.runs / f"tester-{i}.red.json"
+        if saved.exists():  # resuming: the stage already ran
+            return json.loads(saved.read_text()) or None
+        self.agent(f"tester-{i}", TESTER, wt).run(
+            f"Overall task:\n{self.spec.text}\n\nSubtask to write a regression test for "
+            f"({sub['title']}):\n{sub['description']}")
+        commit_all(wt, f"Add regression test: {sub['title']}\n\nfleet task {self.spec.task_id}, tester-{i}")
+        files = git(wt, "diff", "--name-only", self.base, "HEAD").split()
+        # ponytail: "red" = the test command narrowed to the new files fails. A --test-cmd that
+        # already names its files runs those too, so a pre-existing failure also reads as red.
+        ok, _ = self.toolbox(wt).run_tests(files) if files else (True, "")
+        red = None
+        if files and all(is_test_path(f) for f in files) and not ok:
+            red = {"files": files, "commit": head(wt)}
+        elif files:  # not a test-only change, or it does not reproduce the bug
+            git(wt, "reset", "--quiet", "--hard", self.base)
+        saved.write_text(json.dumps(red))
+        return red
+
+    def review(self, i: int, rnd: int, wt: Path, sub: dict, red: dict | None = None) -> tuple[str, str]:
         ok, tests = self.toolbox(wt).run_tests()
+        note = (f"\n\nThe regression test ({', '.join(red['files'])}) was written before the fix and "
+                "failed on the base code; check that it tests the reported behaviour." if red else "")
         res = self.agent(f"reviewer-{i}" + ("" if rnd == 1 else f".r{rnd}"), REVIEWER, wt).run(
             f"Overall task:\n{self.spec.text}\n\nSubtask under review ({sub['title']}):\n"
             f"{sub['description']}\n\nDiff against base:\n```diff\n{diff(wt, self.base)}\n```\n\n"
-            f"Test run ({'passing' if ok else 'FAILING'}):\n```\n{tests[-6000:]}\n```")
+            f"Test run ({'passing' if ok else 'FAILING'}):\n```\n{tests[-6000:]}\n```{note}")
         verdict = res.output.get("verdict") if res.ok else None
         if verdict not in ("approve", "request_changes"):
             return "request_changes", f"reviewer did not finish ({res.status})"

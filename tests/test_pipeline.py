@@ -4,6 +4,8 @@ from fleet.pipeline import Pipeline, TaskSpec
 from fleet.tools import git
 from fleet.trajectory import read
 
+from .conftest import make_repo
+
 APPROVE = [[{"name": "finish", "input": {"verdict": "approve", "feedback": "lgtm"}}]]
 ONE_PLAN = [[{"name": "list_dir", "input": {"path": "."}}],
             [{"name": "finish", "input": {"summary": "fix add", "subtasks": [
@@ -134,3 +136,57 @@ def test_cost_budget_is_a_hard_stop(repo, tmp_path):
     end = read(tmp_path / "home" / "runs" / "t1" / "worker-1.jsonl")[-1]
     assert end["status"] == "budget_exhausted" and end["reason"] == "task cost budget"
     assert end["turns"] < 20 and end["cost"] > 0
+
+
+REGRESSION = ("import unittest\nfrom calc import add\n\n\nclass Regression(unittest.TestCase):\n"
+              "    def test_add_negative(self):\n        self.assertEqual(add(-2, 5), 3)\n")
+FIX = [[{"name": "apply_patch", "input": {"path": "calc.py", "old": "a - b", "new": "a + b"}}]]
+
+
+def run_test_first(repo, tmp_path, tester):
+    import json
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    p = tmp_path / "script.json"
+    p.write_text(json.dumps({"planner": ONE_PLAN, "tester": tester, "worker": FIX, "reviewer": APPROVE}))
+    spec = TaskSpec("t1", str(repo), "Fix the failing test", test_cmd="python3 -m unittest -q",
+                    sandbox="subprocess", budget=Budget(max_turns=10), test_first=True)
+    return Pipeline(spec, ModelFactory("scripted", script=p), tmp_path / "home").run()
+
+
+def test_test_first_commits_a_red_test_before_the_fix(repo, tmp_path):
+    result = run_test_first(repo, tmp_path, [
+        [{"name": "write_file", "input": {"path": "test_regression.py", "content": REGRESSION}}],
+        [{"name": "run_tests", "input": {}}],
+        [{"name": "finish", "input": {"summary": "add(-2, 5) must be 3", "test_files": ["test_regression.py"]}}]])
+    red = result["subtasks"][0]["regression_test"]
+    assert red["files"] == ["test_regression.py"]
+    assert result["tests_passed"] and "Regression" in git(repo, "show", "fleet/t1:test_regression.py")
+    # the test commit comes before the fix on the worker branch
+    log = git(repo, "log", "--format=%s", "fleet/t1").splitlines()
+    assert log.index("Fix add") < log.index("Add regression test: Fix add")
+    worker = read(tmp_path / "home" / "runs" / "t1" / "worker-1.jsonl")[0]
+    assert "test_regression.py" in worker["task"] and "without changing it" in worker["task"]
+    reviewer = read(tmp_path / "home" / "runs" / "t1" / "reviewer-1.jsonl")[0]
+    assert "regression test (test_regression.py) was written before the fix" in reviewer["task"]
+
+
+def test_test_first_drops_a_test_that_passes_or_touches_code(repo, tmp_path):
+    passing = REGRESSION.replace("add(-2, 5), 3", "2 + 2, 4")
+    result = run_test_first(repo, tmp_path, [
+        [{"name": "write_file", "input": {"path": "test_regression.py", "content": passing}}]])
+    assert result["subtasks"][0]["regression_test"] is None and result["tests_passed"]
+    assert "test_regression.py" not in git(repo, "ls-tree", "--name-only", "fleet/t1")
+
+    result = run_test_first(make_repo(tmp_path / "r2"), tmp_path / "second", [
+        [{"name": "write_file", "input": {"path": "test_regression.py", "content": REGRESSION}},
+         {"name": "apply_patch", "input": {"path": "calc.py", "old": "a * b", "new": "a * b  # touched"}}]])
+    assert result["subtasks"][0]["regression_test"] is None  # edited non-test code: dropped
+
+
+def test_is_test_path():
+    from fleet.pipeline import is_test_path
+    for p in ("tests/test_x.py", "test_calc.py", "pkg/foo_test.go", "src/a.test.ts", "web/__tests__/a.js",
+              "spec/models/user_spec.rb"):
+        assert is_test_path(p), p
+    for p in ("calc.py", "src/latest.ts", "contest/solve.py", "attestation.py"):
+        assert not is_test_path(p), p

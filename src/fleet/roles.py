@@ -63,6 +63,21 @@ In `finish`, summarize what you changed and why, and report the final test resul
     _schema({"summary": _str, "tests_passed": {"type": "boolean"}}, ["summary", "tests_passed"]),
 )
 
+TESTER = Role(
+    "tester",
+    COMMON + """
+
+Your role: TEST WRITER. Nobody has fixed this subtask yet. Before they do, add a regression \
+test that reproduces it: find the project's test layout and framework, and add a focused \
+test (a new test file, or a new test in an existing file) that states the expected \
+behaviour. Change test files only - never the code under test. Run the tests: your new test \
+must FAIL on the current code, and fail for the reason in the subtask (a wrong result, not \
+an import or syntax error). In `finish`, list the test files you created or changed.""",
+    ALL_TOOLS,
+    "Report the regression test you added.",
+    _schema({"summary": _str, "test_files": {"type": "array", "items": _str}}, ["summary", "test_files"]),
+)
+
 REVIEWER = Role(
     "reviewer",
     COMMON + """
@@ -90,4 +105,4 @@ integration test failures. Keep changes minimal. Run the full test suite before 
     _schema({"summary": _str, "tests_passed": {"type": "boolean"}}, ["summary", "tests_passed"]),
 )
 
-ROLES = {r.name: r for r in (PLANNER, WORKER, REVIEWER, INTEGRATOR)}
+ROLES = {r.name: r for r in (PLANNER, TESTER, WORKER, REVIEWER, INTEGRATOR)}
