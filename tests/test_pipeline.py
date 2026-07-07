@@ -190,3 +190,26 @@ def test_is_test_path():
         assert is_test_path(p), p
     for p in ("calc.py", "src/latest.ts", "contest/solve.py", "attestation.py"):
         assert not is_test_path(p), p
+
+
+def test_worker_edits_to_the_regression_test_are_reverted(repo, tmp_path):
+    import json
+    weakened = REGRESSION.replace("add(-2, 5), 3", "True, True")
+    p = tmp_path / "script.json"
+    p.write_text(json.dumps({
+        "planner": ONE_PLAN,
+        "tester": [[{"name": "write_file", "input": {"path": "test_regression.py", "content": REGRESSION}}]],
+        "worker-1": [[{"name": "write_file", "input": {"path": "test_regression.py", "content": weakened}}]],
+        "worker-1.r2": FIX,
+        "reviewer": APPROVE}))
+    spec = TaskSpec("t1", str(repo), "Fix the failing test", test_cmd="python3 -m unittest -q",
+                    sandbox="subprocess", budget=Budget(max_turns=10), test_first=True)
+    result = Pipeline(spec, ModelFactory("scripted", script=p), tmp_path / "home").run()
+    sub = result["subtasks"][0]
+    assert [r["agent"] for r in sub["rounds"]] == ["worker-1", "worker-1.r2"] and sub["verdict"] == "approve"
+    assert git(repo, "show", "fleet/t1:test_regression.py") == REGRESSION  # restored, not weakened
+    runs = tmp_path / "home" / "runs" / "t1"
+    assert not (runs / "reviewer-1.jsonl").exists()  # no review spent on the tampered round
+    r2 = read(runs / "worker-1.r2.jsonl")[0]["task"]
+    assert "You changed the regression test (test_regression.py); it has been restored" in r2
+    assert result["tests_passed"]
