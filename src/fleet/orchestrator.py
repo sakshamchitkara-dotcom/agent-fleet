@@ -93,6 +93,10 @@ class Orchestrator:
             t = result["tokens"]
             error = (f"task budget exhausted: {t['total']:,} tokens, ${t['cost_usd']:.4f}"
                      + (f" of ${t['max_cost_usd']:.2f}" if t.get("max_cost_usd") else ""))
+        if success and task["options"].get("pr") and task["options"].get("await_approval"):
+            self.queue.update(tid, status="awaiting_approval", stage="awaiting approval", result=result)
+            log.info("task %s: waiting for approval before opening a PR", tid)
+            return
         if success and task["options"].get("pr"):
             try:
                 self.queue.update(tid, stage="opening PR")
@@ -110,3 +114,28 @@ class Orchestrator:
         title = task["options"].get("title") or short_title(task["text"].strip().splitlines()[0])
         return github.open_pr(Path(result["repo"]), *gh, result["branch"], title,
                               github.pr_body(task, result))
+
+
+class NotAwaitingApproval(ValueError):
+    pass
+
+
+def approve(home: str | Path, queue: Queue, tid: str) -> str:
+    """Human sign-off: open the PR for a task that is waiting for approval. Returns its URL."""
+    if not queue.transition(tid, "awaiting_approval", "approved", stage="opening PR"):
+        raise NotAwaitingApproval(f"task {tid} is not awaiting approval")
+    task = queue.get(tid)
+    try:
+        url = Orchestrator(home, queue).open_pr(task, task["result"])
+    except Exception as e:  # ownership checks still apply; the branch stays local
+        queue.update(tid, status="failed", stage="finished", error=f"PR not opened: {e}")
+        raise
+    queue.update(tid, status="done", stage="finished", pr_url=url)
+    return url
+
+
+def reject(queue: Queue, tid: str, reason: str = "") -> None:
+    """Decline the change: no PR; the branch is kept and `fleet retry` can start over."""
+    if not queue.transition(tid, "awaiting_approval", "failed", stage="finished",
+                            error="rejected at approval" + (f": {reason}" if reason else "")):
+        raise NotAwaitingApproval(f"task {tid} is not awaiting approval")
