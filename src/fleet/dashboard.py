@@ -41,6 +41,13 @@ PAGE = """<!doctype html>
   .log { max-height:460px; overflow:auto }
   pre { background:var(--card); border:1px solid var(--line); padding:10px; overflow:auto; font-size:12px }
   .table-wrap { overflow-x:auto }
+  .approval { border:1px solid var(--run); border-radius:6px; padding:10px 12px; margin:12px 0; background:var(--card) }
+  .approval button { font:inherit; padding:5px 12px; margin-right:8px; border-radius:5px; border:1px solid var(--line);
+                     background:var(--bg); color:var(--fg); cursor:pointer }
+  .approval button.go { background:var(--ok); border-color:var(--ok); color:#fff }
+  .approval input { font:inherit; padding:4px 8px; width:min(360px,100%); margin:6px 0; border:1px solid var(--line);
+                    border-radius:5px; background:var(--bg); color:var(--fg) }
+  .s-awaiting_approval{color:var(--run)}
 </style></head><body><main>
 <h1><a href="/">agent-fleet</a> <span id="sub" class="muted"></span></h1>
 <div id="app" class="muted">loading...</div>
@@ -52,6 +59,19 @@ const el = (tag, attrs = {}, ...kids) => { const e = document.createElement(tag)
 const usd = c => c < 1 ? `$${(c || 0).toFixed(4)}` : `$${c.toFixed(2)}`;
 const ago = t => { const s = Date.now()/1000 - t; return s < 60 ? `${s|0}s` : s < 3600 ? `${s/60|0}m` : `${s/3600|0}h`; };
 const m = location.pathname.match(/^\\/task\\/([0-9a-f]{8})$/);
+let paused = false;  // no re-render while a human is deciding on an approval
+
+async function decide(id, action) {
+  const reason = (document.getElementById("reason") || {}).value || "";
+  const msg = document.getElementById("decision");
+  msg.textContent = action === "approve" ? "opening PR..." : "rejecting...";
+  for (const b of document.querySelectorAll(".approval button")) b.disabled = true;
+  const r = await fetch(`/api/task/${id}/${action}`, {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify({reason})});
+  const d = await r.json();
+  msg.textContent = r.ok ? (d.pr_url ? `PR opened: ${d.pr_url}` : "rejected") : `error: ${d.error}`;
+  paused = false;
+}
 
 function describe(e) {
   if (e.event === "tool") return `${e.is_error ? "!" : ">"} ${e.name} ${JSON.stringify(e.input).slice(0, 160)}`;
@@ -93,6 +113,17 @@ async function detail(id) {
   if (r.branch !== undefined) head.append(el("p", {}, `branch ${r.branch} - tests ${r.tests_passed ? "PASS" : "FAIL"}`),
     el("pre", {}, r.diffstat || "(no changes)"));
   if (t.error) head.append(el("pre", {class: "s-failed"}, t.error));
+  if (t.status === "awaiting_approval") {
+    paused = true;
+    const approveBtn = el("button", {class: "go"}, "Approve and open PR"), rejectBtn = el("button", {}, "Reject");
+    approveBtn.onclick = () => decide(id, "approve"); rejectBtn.onclick = () => decide(id, "reject");
+    head.append(el("div", {class: "approval"},
+      el("p", {}, el("b", {}, "Waiting for your approval. "), "Nothing has been pushed; review the change below."),
+      el("pre", {}, r.diff || "(no diff)"),
+      el("label", {for: "reason", class: "muted"}, "Reason (optional, recorded on reject)"), el("br"),
+      el("input", {id: "reason", type: "text"}), el("br"), approveBtn, rejectBtn,
+      el("span", {id: "decision", class: "muted"})));
+  }
   const agents = el("div", {class: "agents"});
   for (const [name, evs] of Object.entries(d.agents)) {
     const last = evs[evs.length - 1] || {};
@@ -106,13 +137,14 @@ async function detail(id) {
   for (const l of document.querySelectorAll(".log")) l.scrollTop = l.scrollHeight;
 }
 
-const tick = () => (m ? detail(m[1]) : list()).catch(e => console.error(e));
+const tick = () => paused ? null : (m ? detail(m[1]) : list()).catch(e => console.error(e));
 tick(); setInterval(tick, 2000);
 </script></body></html>
 """
 
 
 def make_handler(home: Path):
+    from .orchestrator import NotAwaitingApproval, approve, reject
     queue = Queue(home / "fleet.db")
 
     class Handler(BaseHTTPRequestHandler):
@@ -152,6 +184,36 @@ def make_handler(home: Path):
                 return self.json({"task": task, "agents": agents, "isolation": isolation(runs),
                                   "spend": spend(runs), "max_cost": task["options"].get("max_cost")})
             self.json({"error": "not found"}, 404)
+
+        def same_origin(self) -> bool:
+            """State-changing requests only from this dashboard's own page: a JSON content type
+            (cross-site forms can't send one without a CORS preflight, which is never granted),
+            a Host that is this server (DNS rebinding) and a matching Origin when one is sent."""
+            port = self.server.server_address[1]
+            hosts = {f"{h}:{port}" for h in ("127.0.0.1", "localhost", "[::1]", self.server.server_address[0])}
+            host = self.headers.get("Host", "")
+            origin = self.headers.get("Origin")
+            return (self.headers.get("Content-Type", "").split(";")[0].strip() == "application/json"
+                    and host in hosts and (origin is None or origin == f"http://{host}"))
+
+        def do_POST(self):
+            parts = self.path.split("?")[0].strip("/").split("/")
+            if not (len(parts) == 4 and parts[:2] == ["api", "task"] and TASK_ID.match(parts[2])
+                    and parts[3] in ("approve", "reject")):
+                return self.json({"error": "not found"}, 404)
+            if not self.same_origin():
+                return self.json({"error": "forbidden"}, 403)
+            try:
+                length = min(int(self.headers.get("Content-Length") or 0), 10_000)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                if parts[3] == "approve":
+                    return self.json({"pr_url": approve(home, queue, parts[2])})
+                reject(queue, parts[2], str(body.get("reason", ""))[:500])
+                return self.json({"status": "failed"})
+            except NotAwaitingApproval as e:
+                return self.json({"error": str(e)}, 409)
+            except Exception as e:  # e.g. NotOwnedError or gh failure; the task records it too
+                return self.json({"error": f"{type(e).__name__}: {e}"}, 500)
 
     return Handler
 
