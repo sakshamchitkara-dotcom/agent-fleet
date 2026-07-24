@@ -80,7 +80,7 @@ function describe(e) {
   if (e.event === "start") return `+ start (${(e.isolation || e.sandbox || "?").split(":")[0]} sandbox): ${e.task.split("\\n").find(l => l.trim() && !/^(Overall )?task:$/i.test(l.trim())) || ""}`.slice(0, 200);
   if (e.event === "end") return `= ${e.status} after ${e.turns} turns, ${e.tokens} tokens, ${usd(e.cost)}`;
   if (e.event === "resume") return `+ resumed from checkpoint after turn ${e.turn}`;
-  if (e.event === "compact") return `# compacted ${e.messages_before} messages`;
+  if (e.event === "compact") return `# compacted ${e.messages_before} messages into notes (${usd(e.cost)})`;
   return `# ${e.event}`;
 }
 

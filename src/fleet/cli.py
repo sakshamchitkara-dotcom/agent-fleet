@@ -217,6 +217,8 @@ def describe(e: dict) -> str:
         return f"+ resumed from checkpoint after turn {e['turn']}"
     if kind == "start":
         return f"+ start: {e['task'].splitlines()[0][:100]}"
+    if kind == "compact":
+        return f"# compacted {e['messages_before']} messages into notes ({usd(e.get('cost', 0))})"
     return f"# {kind}"
 
 
