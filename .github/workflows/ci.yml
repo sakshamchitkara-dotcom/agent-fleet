@@ -39,5 +39,7 @@ jobs:
         run: FLEET_DOCKER_TESTS=1 pytest -q tests/test_sandbox.py -k docker
       - name: Offline demo
         run: examples/demo.sh --sandbox subprocess
-      - name: Benchmark (scripted backend)
+      - name: Benchmark (scripted backend, Python + JavaScript + TypeScript cases)
         run: fleet bench --backend scripted --min-pass 1
+      - name: Benchmark with a regression test written before each fix
+        run: fleet bench --backend scripted --test-first --min-pass 1
