@@ -10,6 +10,13 @@
         {"title": "Fix inverted discount in apply_discount", "description": "In shop/pricing.py, apply_discount(price, percent) returns price * percent / 100. It must return price * (1 - percent / 100), rounded to cents, keeping the percent range validation. cart_total calls it, so no change is needed there. Verify with tests/test_pricing.py."}
       ]}}]
   ],
+  "tester": [
+    [{"name": "search_symbols", "input": {"query": "apply_discount"}},
+     {"name": "list_dir", "input": {"path": "tests"}}],
+    [{"name": "write_file", "input": {"path": "tests/test_regression_discount.py", "content": "import unittest\n\nfrom shop.pricing import apply_discount, cart_total\n\n\nclass InvertedDiscountRegression(unittest.TestCase):\n    \"\"\"Issue #1: a discount must lower the price by that percentage.\"\"\"\n\n    def test_ten_percent_off(self):\n        self.assertEqual(apply_discount(200.0, 10), 180.0)\n\n    def test_cart_total_with_discount(self):\n        self.assertEqual(cart_total([(50.0, 2)], discount=10), 90.0)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"}}],
+    [{"name": "run_command", "input": {"command": "python -m unittest -v tests.test_regression_discount"}}],
+    [{"name": "finish", "input": {"summary": "apply_discount(200, 10) must be 180.0 and cart_total([(50, 2)], 10) must be 90.0; both fail on the current code.", "test_files": ["tests/test_regression_discount.py"]}}]
+  ],
   "worker": [
     [{"name": "read_file", "input": {"path": "shop/pricing.py"}},
      {"name": "read_file", "input": {"path": "tests/test_pricing.py"}}],
