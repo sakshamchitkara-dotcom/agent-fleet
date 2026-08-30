@@ -13,6 +13,14 @@ from .sandbox import Sandbox, _truncate
 
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache"}
 MAX_READ = 40_000
+# Runners that take test files as arguments; others (make, npm test, go test ...) are run whole.
+FILE_RUNNERS = re.compile(r"\b(pytest|unittest|node\s+--test|jest|vitest|mocha|rspec)\b")
+SHELL_OPS = re.compile(r"[;&|<>`$()]")
+TEST_PATH = re.compile(r"(^|/)(tests?|spec|__tests__)/|(^|/)test_[^/]*$|_test\.[^/]+$|\.(test|spec)\.[^/]+$")
+
+
+def is_test_path(path: str) -> bool:
+    return bool(TEST_PATH.search(path))
 
 
 class ToolError(Exception):
@@ -163,10 +171,22 @@ class Toolbox:
     def t_run_tests(self) -> str:
         return self.run_tests()[1]
 
+    def narrowed(self, paths: list[str]) -> str | None:
+        """The test command running only `paths`, or None when that can't be built safely: the
+        runner isn't one known to take file arguments, or the command is a shell pipeline.
+        Test files or directories the command already names are dropped, so their (possibly
+        pre-existing) failures can't be mistaken for failures of `paths`."""
+        if not FILE_RUNNERS.search(self.test_cmd) or SHELL_OPS.search(self.test_cmd):
+            return None
+        argv = shlex.split(self.test_cmd)
+        keep = [a for i, a in enumerate(argv) if i == 0 or a.startswith("-") or not (
+            (self.root / a).is_dir() or ((self.root / a).is_file() and is_test_path(a)))]
+        return shlex.join(keep + paths)
+
     def run_tests(self, paths: list[str] | None = None) -> tuple[bool, str]:
-        """The suite, or with `paths` the test command narrowed to those files (pytest,
-        unittest, node --test, jest, vitest, mocha and rspec all take file arguments)."""
-        cmd = " ".join([self.test_cmd, *map(shlex.quote, paths or [])])
+        """The suite, or with `paths` the test command narrowed to those files (see `narrowed`;
+        falls back to the whole suite when the command can't be narrowed)."""
+        cmd = (self.narrowed(paths) if paths else None) or self.test_cmd
         r = self.sandbox.run(cmd, timeout=max(self.sandbox.timeout, 600))
         return r.exit_code == 0, f"$ {cmd}\n{r.render()}"
 
