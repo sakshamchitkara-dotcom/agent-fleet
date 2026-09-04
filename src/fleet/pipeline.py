@@ -143,10 +143,22 @@ class Pipeline:
         """Tester stage: a regression test committed on the worker's branch before any fix.
 
         Kept only if it touches test files alone and those tests fail on the base code; otherwise
-        the commit is dropped and the worker starts from base as usual."""
+        the commit is dropped and the worker starts from base as usual. With a test command that
+        can't be narrowed to the new files (npm test, make, go test ./...) the tester only runs
+        when the suite passes on base, since a failure could not be pinned on its test."""
         saved = self.runs / f"tester-{i}.red.json"
         if saved.exists():  # resuming: the stage already ran
             return json.loads(saved.read_text()) or None
+        tb = self.toolbox(wt)
+        if tb.narrowed([]) is None:
+            # The command can't be narrowed to the new test, so a failure is only attributable to
+            # it if the suite passed without it. Measured on base, before the tester touches wt.
+            base = self.runs / f"tester-{i}.base.json"
+            if not base.exists():
+                base.write_text(json.dumps(tb.run_tests()[0]))
+            if not json.loads(base.read_text()):
+                saved.write_text("null")  # no tester run: nothing it wrote could be shown to be red
+                return None
         self.agent(f"tester-{i}", TESTER, wt).run(
             f"Overall task:\n{self.spec.text}\n\nSubtask to write a regression test for "
             f"({sub['title']}):\n{sub['description']}")
@@ -154,7 +166,7 @@ class Pipeline:
         files = git(wt, "diff", "--name-only", self.base, "HEAD").split()
         # "red" = the test command narrowed to the new files fails; files the command already
         # names are left out of that run (Toolbox.narrowed).
-        ok, _ = self.toolbox(wt).run_tests(files) if files else (True, "")
+        ok, _ = tb.run_tests(files) if files else (True, "")
         red = None
         if files and all(is_test_path(f) for f in files) and not ok:
             red = {"files": files, "commit": head(wt)}

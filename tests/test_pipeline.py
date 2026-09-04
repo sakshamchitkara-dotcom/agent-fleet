@@ -196,6 +196,30 @@ def test_test_first_ignores_failures_of_files_the_test_cmd_names(repo, tmp_path)
     assert result["subtasks"][0]["regression_test"]["files"] == ["test_regression.py"]
 
 
+def test_test_first_with_an_unnarrowable_command_needs_a_green_base(repo, tmp_path):
+    def commit_files(r, files):
+        for name, text in files.items():
+            (r / name).write_text(text)
+        git(r, "add", "-A")
+        git(r, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "setup")
+        return r
+
+    runner = {"check.py": "import subprocess, sys\n"
+                          "sys.exit(subprocess.call([sys.executable, '-m', 'unittest', '-q']))\n"}
+    tester = [[{"name": "write_file", "input": {"path": "test_regression.py", "content": REGRESSION}}]]
+    # base already fails (test_calc.py): a new failing test proves nothing, so no tester runs
+    result = run_test_first(commit_files(repo, runner), tmp_path, tester, "python3 check.py")
+    assert result["subtasks"][0]["regression_test"] is None
+    assert not (tmp_path / "home" / "runs" / "t1" / "tester-1.jsonl").exists()
+
+    # base passes: the tester's failing test is kept
+    green = {**runner, "test_calc.py": "import unittest\nfrom calc import mul\n\n\nclass T(unittest.TestCase):\n"
+                                       "    def test_mul(self):\n        self.assertEqual(mul(2, 3), 6)\n"}
+    result = run_test_first(commit_files(make_repo(tmp_path / "r2"), green), tmp_path / "second", tester,
+                            "python3 check.py")
+    assert result["subtasks"][0]["regression_test"]["files"] == ["test_regression.py"]
+
+
 def test_is_test_path():
     from fleet.pipeline import is_test_path
     for p in ("tests/test_x.py", "test_calc.py", "pkg/foo_test.go", "src/a.test.ts", "web/__tests__/a.js",
