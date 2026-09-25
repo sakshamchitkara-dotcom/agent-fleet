@@ -4,6 +4,12 @@
     [{"name": "finish", "input": {"summary": "countWords splits on a single space.", "subtasks": [
       {"title": "Split words on runs of whitespace", "description": "In words.js, countWords() uses text.split(\" \"), so repeated, leading or trailing whitespace yields empty strings that are counted, and '' counts as one word. Split the trimmed text on /\\s+/ and return 0 for blank text."}]}}]
   ],
+  "tester": [
+    [{"name": "repo_map", "input": {}}],
+    [{"name": "write_file", "input": {"path": "tests/regression.test.js", "content": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { countWords } from \"../words.js\";\n\ntest(\"regression: whitespace runs are one separator\", () => {\n  assert.equal(countWords(\" one  two\\tthree \"), 3);\n});\n"}}],
+    [{"name": "run_tests", "input": {}}],
+    [{"name": "finish", "input": {"summary": "countWords(' one  two\\tthree ') must be 3.", "test_files": ["tests/regression.test.js"]}}]
+  ],
   "worker": [
     [{"name": "read_file", "input": {"path": "words.js"}}],
     [{"name": "apply_patch", "input": {"path": "words.js", "old": "  return text.split(\" \").length;", "new": "  const trimmed = text.trim();\n  return trimmed === \"\" ? 0 : trimmed.split(/\\s+/).length;"}}],

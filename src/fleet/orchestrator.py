@@ -33,7 +33,7 @@ def spec_for(task: dict) -> TaskSpec:
         image=o.get("image", DEFAULT_IMAGE),
         max_workers=o.get("max_workers", 3), review_rounds=o.get("review_rounds", 2),
         budget=Budget(max_turns=o.get("max_turns", 40), max_tokens=o.get("max_tokens", 3_000_000)),
-        task_tokens=o.get("task_tokens"), max_cost=o.get("max_cost"),
+        task_tokens=o.get("task_tokens"), max_cost=o.get("max_cost"), test_first=o.get("test_first", False),
     )
 
 

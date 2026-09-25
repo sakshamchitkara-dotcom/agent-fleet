@@ -69,8 +69,10 @@ def pr_body(task: dict, result: dict) -> str:
     lines += ["## Subtasks", ""]
     for s in result.get("subtasks", []):
         last = s["rounds"][-1]["summary"] if s.get("rounds") else ""
+        red = s.get("regression_test")
+        test = f" Regression test written first: {', '.join(f'`{f}`' for f in red['files'])}." if red else ""
         lines.append(f"- **{s['title']}** - review: `{s['verdict']}`, "
-                     f"{len(s.get('rounds', []))} round(s). {last}".rstrip())
+                     f"{len(s.get('rounds', []))} round(s). {last}{test}".rstrip())
     if result.get("trajectory"):
         lines += ["", "## Trajectory", "",
                   "| agent | outcome | turns | tool calls | tokens | est. cost |",

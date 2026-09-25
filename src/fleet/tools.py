@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -162,9 +163,12 @@ class Toolbox:
     def t_run_tests(self) -> str:
         return self.run_tests()[1]
 
-    def run_tests(self) -> tuple[bool, str]:
-        r = self.sandbox.run(self.test_cmd, timeout=max(self.sandbox.timeout, 600))
-        return r.exit_code == 0, f"$ {self.test_cmd}\n{r.render()}"
+    def run_tests(self, paths: list[str] | None = None) -> tuple[bool, str]:
+        """The suite, or with `paths` the test command narrowed to those files (pytest,
+        unittest, node --test, jest, vitest, mocha and rspec all take file arguments)."""
+        cmd = " ".join([self.test_cmd, *map(shlex.quote, paths or [])])
+        r = self.sandbox.run(cmd, timeout=max(self.sandbox.timeout, 600))
+        return r.exit_code == 0, f"$ {cmd}\n{r.render()}"
 
     def t_git_diff(self) -> str:
         return diff(self.root) or "(no changes)"

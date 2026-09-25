@@ -28,7 +28,7 @@ def home_dir(args) -> Path:
 def task_options(args) -> dict:
     opts = {k: getattr(args, k) for k in ("test_cmd", "sandbox", "image", "backend", "provider", "model", "effort",
                                           "max_workers", "review_rounds", "max_turns", "task_tokens", "max_cost",
-                                          "pr")}
+                                          "test_first", "pr")}
     if args.script:
         opts["script"] = str(Path(args.script).resolve())
     return opts
@@ -51,6 +51,8 @@ def add_task_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--task-tokens", type=int, help="token budget shared by all agents of the task")
     p.add_argument("--max-cost", type=float, metavar="USD",
                    help="hard stop once the task's estimated API cost reaches this many dollars")
+    p.add_argument("--test-first", action="store_true",
+                   help="a tester agent adds a failing regression test before each subtask is fixed")
     p.add_argument("--max-attempts", type=int, default=2, help="retries on crashes")
     p.add_argument("--pr", action="store_true",
                    help="push the branch and open a PR (only on repos you own)")
@@ -151,7 +153,9 @@ def show(args, tid: str) -> None:
     if r:
         print(f"branch: {r.get('branch')}  tests: {'PASS' if r.get('tests_passed') else 'FAIL'}")
         for s in r.get("subtasks", []):
-            print(f"  - [{s['verdict']}] {s['title']} ({len(s['rounds'])} round(s))")
+            red = s.get("regression_test")
+            print(f"  - [{s['verdict']}] {s['title']} ({len(s['rounds'])} round(s))"
+                  + (f", regression test {', '.join(red['files'])}" if red else ""))
         if r.get("diffstat"):
             print(r["diffstat"])
     per_agent = spend(home_dir(args) / "runs" / t["id"])
@@ -243,7 +247,7 @@ def cmd_bench(args) -> None:
     if unknown:
         sys.exit(f"unknown case(s): {', '.join(sorted(unknown))}; have {', '.join(bench.case_names())}")
     home = Path(tempfile.mkdtemp(prefix="fleet-bench-"))
-    opts = {k: getattr(args, k) for k in ("provider", "model", "effort", "max_turns", "max_cost")
+    opts = {k: getattr(args, k) for k in ("provider", "model", "effort", "max_turns", "max_cost", "test_first")
             if getattr(args, k)}
     print(f"bench: {len(cases)} case(s), {backend} backend, state in {home}", flush=True)
     results = bench.run(cases, backend, home, sandbox=args.sandbox, concurrency=args.concurrency, **opts)
@@ -341,6 +345,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"])
     p.add_argument("--max-turns", type=int)
     p.add_argument("--max-cost", type=float, metavar="USD", help="per-case hard budget")
+    p.add_argument("--test-first", action="store_true", help="write a failing regression test before each fix")
     p.add_argument("--concurrency", type=int, default=2)
     p.add_argument("--json", metavar="PATH", help="also write results as JSON")
     p.add_argument("--min-pass", type=float, default=0.0, help="exit non-zero below this pass rate (0-1)")
