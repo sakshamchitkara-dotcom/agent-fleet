@@ -29,6 +29,7 @@ def spec_for(task: dict) -> TaskSpec:
     return TaskSpec(
         task_id=task["id"], repo=task["repo"], text=task["text"],
         test_cmd=o.get("test_cmd", "python -m pytest -q"), sandbox=o.get("sandbox", "auto"),
+        image=o.get("image", "python:3.12-slim"),
         max_workers=o.get("max_workers", 3), review_rounds=o.get("review_rounds", 2),
         budget=Budget(max_turns=o.get("max_turns", 40), max_tokens=o.get("max_tokens", 3_000_000)),
         task_tokens=o.get("task_tokens"),

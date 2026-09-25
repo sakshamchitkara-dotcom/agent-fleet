@@ -26,6 +26,7 @@ class TaskSpec:
     text: str
     test_cmd: str = "python -m pytest -q"
     sandbox: str = "auto"
+    image: str = "python:3.12-slim"  # docker sandbox image; bake project deps into your own
     max_workers: int = 3
     review_rounds: int = 2
     budget: Budget = field(default_factory=Budget)
@@ -51,7 +52,7 @@ class Pipeline:
         return f"fleet/{self.spec.task_id}" + (f"-{suffix}" if suffix else "")
 
     def toolbox(self, wt: Path) -> Toolbox:
-        return Toolbox(wt, Sandbox(wt, mode=self.spec.sandbox), self.spec.test_cmd)
+        return Toolbox(wt, Sandbox(wt, mode=self.spec.sandbox, image=self.spec.image), self.spec.test_cmd)
 
     def agent(self, name: str, role: Role, wt: Path) -> Agent:
         return Agent(name, role, self.models(name), self.toolbox(wt),

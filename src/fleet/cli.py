@@ -22,7 +22,7 @@ def home_dir(args) -> Path:
 
 
 def task_options(args) -> dict:
-    opts = {k: getattr(args, k) for k in ("test_cmd", "sandbox", "backend", "model", "effort",
+    opts = {k: getattr(args, k) for k in ("test_cmd", "sandbox", "image", "backend", "model", "effort",
                                           "max_workers", "review_rounds", "max_turns", "task_tokens", "pr")}
     if args.script:
         opts["script"] = str(Path(args.script).resolve())
@@ -32,6 +32,8 @@ def task_options(args) -> dict:
 def add_task_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--test-cmd", default="python -m pytest -q", help="command that runs the test suite")
     p.add_argument("--sandbox", choices=["auto", "docker", "subprocess"], default="auto")
+    p.add_argument("--image", default="python:3.12-slim",
+                   help="docker sandbox image (should contain your project's test dependencies)")
     p.add_argument("--backend", choices=["claude", "scripted"], default="claude")
     p.add_argument("--script", help="JSON script for the scripted backend")
     p.add_argument("--model", default="claude-opus-5-5")

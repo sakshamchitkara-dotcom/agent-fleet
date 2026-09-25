@@ -60,3 +60,10 @@ def test_permanent_api_errors_not_retried():
     assert not permanent(err(anthropic.RateLimitError, 429))
     assert not permanent(err(anthropic.InternalServerError, 500))
     assert not permanent(RuntimeError("git failed"))
+
+
+def test_spec_for_maps_options():
+    from fleet.orchestrator import spec_for
+    spec = spec_for({"id": "abc", "repo": "o/r", "text": "t", "options": {
+        "image": "myproj:test", "sandbox": "docker", "max_turns": 7, "task_tokens": 1000}})
+    assert (spec.image, spec.sandbox, spec.budget.max_turns, spec.task_tokens) == ("myproj:test", "docker", 7, 1000)
