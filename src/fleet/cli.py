@@ -268,6 +268,8 @@ def _age(seconds: float) -> str:
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="fleet", description="A fleet of autonomous coding agents.")
     ap.add_argument("--home", help="state directory (default $FLEET_HOME or ~/.fleet)")
+    ap.add_argument("--prices", metavar="JSON",
+                    help="custom $/MTok rates (Bedrock, Vertex, negotiated); default $FLEET_PRICES")
     ap.add_argument("-v", "--verbose", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -346,6 +348,13 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(fn=cmd_serve)
 
     args = ap.parse_args(argv)
+    if args.prices:  # agents price every call through pricing.overrides(), in this process
+        from .pricing import load_prices
+        try:
+            load_prices(args.prices)
+        except ValueError as e:
+            sys.exit(str(e))
+        os.environ["FLEET_PRICES"] = str(Path(args.prices).resolve())
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(asctime)s %(levelname)s %(message)s")
     try:
