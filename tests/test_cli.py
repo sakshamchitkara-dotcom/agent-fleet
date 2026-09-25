@@ -26,3 +26,11 @@ def test_scripted_requires_script(tmp_path, capsys):
     import pytest
     with pytest.raises(SystemExit):
         main(["--home", str(tmp_path), "submit", ".", "x", "--backend", "scripted"])
+
+
+def test_local_repo_stored_as_absolute_path(repo, tmp_path, monkeypatch, capsys):
+    from fleet.queue import Queue
+    monkeypatch.chdir(repo)
+    main(["--home", str(tmp_path / "h"), "submit", ".", "x"])
+    tid = capsys.readouterr().out.strip()
+    assert Queue(tmp_path / "h" / "fleet.db").get(tid)["repo"] == str(repo.resolve())
