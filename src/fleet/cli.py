@@ -122,14 +122,24 @@ def show(args, tid: str) -> None:
 
 def cmd_logs(args) -> None:
     runs = home_dir(args) / "runs" / args.id
-    files = sorted(runs.glob(f"{args.agent or '*'}.jsonl"))
-    events = sorted((e for f in files for e in read(f)), key=lambda e: e["ts"])
-    for e in events:
-        if args.json:
-            print(json.dumps(e))
-            continue
-        stamp = time.strftime("%H:%M:%S", time.localtime(e["ts"]))
-        print(f"{stamp} {e['agent']:14} {describe(e)}")
+    queue = Queue(home_dir(args) / "fleet.db")
+    seen: dict[str, int] = {}
+    while True:
+        fresh = []
+        for f in sorted(runs.glob(f"{args.agent or '*'}.jsonl")):
+            events = read(f)
+            fresh += events[seen.get(f.name, 0):]
+            seen[f.name] = len(events)
+        for e in sorted(fresh, key=lambda e: e["ts"]):
+            if args.json:
+                print(json.dumps(e), flush=True)
+            else:
+                stamp = time.strftime("%H:%M:%S", time.localtime(e["ts"]))
+                print(f"{stamp} {e['agent']:14} {describe(e)}", flush=True)
+        task = queue.get(args.id)
+        if not args.follow or (not fresh and task and task["status"] in ("done", "failed", "cancelled")):
+            return
+        time.sleep(1)
 
 
 def describe(e: dict) -> str:
@@ -203,6 +213,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("id")
     p.add_argument("--agent", help="only this agent, e.g. worker-1")
     p.add_argument("--json", action="store_true")
+    p.add_argument("-f", "--follow", action="store_true", help="keep streaming until the task ends")
     p.set_defaults(fn=cmd_logs)
 
     p = sub.add_parser("cancel", help="cancel a queued task")

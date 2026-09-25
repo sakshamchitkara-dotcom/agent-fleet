@@ -18,7 +18,7 @@ def test_run_status_logs(repo, tmp_path, capsys):
     main(["--home", home, "status"])
     assert tid in capsys.readouterr().out
 
-    main(["--home", home, "logs", tid, "--agent", "worker-1"])
+    main(["--home", home, "logs", tid, "--agent", "worker-1", "--follow"])  # task done: returns
     logs = capsys.readouterr().out
     assert "> apply_patch" in logs and "= finished" in logs
 
