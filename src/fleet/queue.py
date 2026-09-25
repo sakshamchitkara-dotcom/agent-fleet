@@ -98,6 +98,13 @@ class Queue:
             return db.execute("UPDATE tasks SET status='cancelled', updated=? WHERE id=? AND status='queued'",
                               (time.time(), tid)).rowcount == 1
 
+    def retry(self, tid: str) -> bool:
+        """Put a failed or cancelled task back in the queue with a fresh attempt count."""
+        with self._db() as db:
+            return db.execute("UPDATE tasks SET status='queued', attempts=0, error='', stage='', "
+                              "updated=? WHERE id=? AND status IN ('failed', 'cancelled')",
+                              (time.time(), tid)).rowcount == 1
+
     def get(self, tid: str) -> dict | None:
         with self._db() as db:
             row = db.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()

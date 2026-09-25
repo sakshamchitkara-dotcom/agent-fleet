@@ -164,6 +164,11 @@ def cmd_cancel(args) -> None:
     print("cancelled" if ok else "only queued tasks can be cancelled")
 
 
+def cmd_retry(args) -> None:
+    ok = Queue(home_dir(args) / "fleet.db").retry(args.id)
+    print("requeued; run `fleet worker` to process it" if ok else "only failed or cancelled tasks can be retried")
+
+
 def cmd_serve(args) -> None:
     from .dashboard import serve
     serve(home_dir(args), args.host, args.port)
@@ -221,6 +226,10 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("cancel", help="cancel a queued task")
     p.add_argument("id")
     p.set_defaults(fn=cmd_cancel)
+
+    p = sub.add_parser("retry", help="requeue a failed or cancelled task")
+    p.add_argument("id")
+    p.set_defaults(fn=cmd_retry)
 
     p = sub.add_parser("serve", help="web dashboard")
     p.add_argument("--host", default="127.0.0.1")
