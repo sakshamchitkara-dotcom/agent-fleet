@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -196,6 +197,32 @@ def cmd_retry(args) -> None:
     print("requeued; run `fleet worker` to process it")
 
 
+def cmd_bench(args) -> None:
+    import tempfile
+
+    from . import bench
+    backend = args.backend
+    if backend == "auto":  # real model when credentials are present, else the offline replay
+        backend = "claude" if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN") \
+            else "scripted"
+    cases = args.cases.split(",") if args.cases else bench.case_names()
+    unknown = set(cases) - set(bench.case_names())
+    if unknown:
+        sys.exit(f"unknown case(s): {', '.join(sorted(unknown))}; have {', '.join(bench.case_names())}")
+    home = Path(tempfile.mkdtemp(prefix="fleet-bench-"))
+    opts = {k: getattr(args, k) for k in ("model", "effort", "max_turns", "max_cost") if getattr(args, k)}
+    print(f"bench: {len(cases)} case(s), {backend} backend, state in {home}", flush=True)
+    results = bench.run(cases, backend, home, sandbox=args.sandbox, concurrency=args.concurrency, **opts)
+    print(bench.report(results, backend))
+    if args.json:
+        Path(args.json).write_text(bench.as_json(results, backend))
+    if not args.keep:
+        shutil.rmtree(home, ignore_errors=True)
+    rate = sum(r.passed for r in results) / len(results)
+    if rate < args.min_pass:
+        sys.exit(f"pass rate {rate:.0%} is below --min-pass {args.min_pass:.0%}")
+
+
 def cmd_serve(args) -> None:
     from .dashboard import serve
     serve(home_dir(args), args.host, args.port)
@@ -257,6 +284,21 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("retry", help="requeue a failed or cancelled task")
     p.add_argument("id")
     p.set_defaults(fn=cmd_retry)
+
+    p = sub.add_parser("bench", help="run the seeded-bug benchmark and report pass rate, turns, tokens")
+    p.add_argument("--backend", choices=["auto", "claude", "scripted"], default="auto",
+                   help="auto: claude when ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN is set, else scripted")
+    p.add_argument("--cases", help="comma-separated subset of cases")
+    p.add_argument("--sandbox", choices=["auto", "docker", "subprocess"], default="subprocess")
+    p.add_argument("--model")
+    p.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"])
+    p.add_argument("--max-turns", type=int)
+    p.add_argument("--max-cost", type=float, metavar="USD", help="per-case hard budget")
+    p.add_argument("--concurrency", type=int, default=2)
+    p.add_argument("--json", metavar="PATH", help="also write results as JSON")
+    p.add_argument("--min-pass", type=float, default=0.0, help="exit non-zero below this pass rate (0-1)")
+    p.add_argument("--keep", action="store_true", help="keep the bench state directory")
+    p.set_defaults(fn=cmd_bench)
 
     p = sub.add_parser("serve", help="web dashboard")
     p.add_argument("--host", default="127.0.0.1")
