@@ -12,6 +12,7 @@ import ast
 import os
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache",
@@ -95,17 +96,29 @@ def regex_symbols(rel: str, text: str, patterns) -> list[Symbol]:
 
 
 def file_symbols(root: Path, path: Path) -> list[Symbol]:
-    rel = str(path.relative_to(root))
     ext = path.suffix.lower()
     if ext not in REGEXES and ext != ".py":
         return []
     try:
-        if path.stat().st_size > MAX_FILE_BYTES:
-            return []
-        text = path.read_text()
-    except (OSError, UnicodeDecodeError):
+        st = path.stat()
+    except OSError:
         return []
-    return python_symbols(rel, text) if ext == ".py" else regex_symbols(rel, text, REGEXES[ext])
+    if st.st_size > MAX_FILE_BYTES:
+        return []
+    return list(_parse(str(path), str(path.relative_to(root)), st.st_mtime_ns, st.st_size))
+
+
+# Keyed by (path, mtime, size): an edited file is re-parsed, an untouched one is not, so
+# repeated repo_map / search_symbols calls only stat the tree.
+# ponytail: unbounded-ish LRU in-process; fine for a few worktrees of tens of thousands of files.
+@lru_cache(maxsize=50_000)
+def _parse(path: str, rel: str, mtime_ns: int, size: int) -> tuple[Symbol, ...]:
+    try:
+        text = Path(path).read_text()
+    except (OSError, UnicodeDecodeError):
+        return ()
+    ext = Path(path).suffix.lower()
+    return tuple(python_symbols(rel, text) if ext == ".py" else regex_symbols(rel, text, REGEXES[ext]))
 
 
 def walk(root: Path, base: Path | None = None):
@@ -115,8 +128,6 @@ def walk(root: Path, base: Path | None = None):
             yield Path(d) / f
 
 
-# ponytail: re-parses the tree on every call; fine for repos up to a few
-# thousand files, cache per (path, mtime) if agents work on big monorepos.
 def index(root: Path, base: Path | None = None) -> list[Symbol]:
     return [s for f in walk(root, base) for s in file_symbols(root, f)]
 
