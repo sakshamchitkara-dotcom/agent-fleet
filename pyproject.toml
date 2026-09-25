@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-fleet"
-version = "0.3.0"
+version = "0.4.0"
 description = "A fleet of autonomous coding agents: plan, edit, test, review, integrate, open a PR."
 readme = "README.md"
 requires-python = ">=3.10"
