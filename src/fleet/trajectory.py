@@ -42,6 +42,27 @@ def spend(runs: str | Path) -> dict[str, dict]:
     return out
 
 
+def summarize(runs: str | Path) -> list[dict]:
+    """One row per agent, in start order: outcome, turns, tool calls, spend and what it reported."""
+    rows = []
+    for f in Path(runs).glob("*.jsonl"):
+        events = read(f)
+        starts = [i for i, e in enumerate(events) if e["event"] == "start"]
+        events = events[starts[-1]:] if starts else events  # the latest run of this agent
+        tools = [e for e in events if e["event"] == "tool"]
+        end = next((e for e in reversed(events) if e["event"] == "end"), {})
+        out = end.get("output") or {}
+        rows.append({"agent": f.stem, "ts": events[0]["ts"] if events else 0,
+                     "status": end.get("status", "running"), "turns": end.get("turns", 0),
+                     "tool_calls": len(tools), "tool_errors": sum(bool(t.get("is_error")) for t in tools),
+                     "steps": [t["name"] for t in tools],
+                     "tokens": end.get("tokens", 0), "cost": end.get("cost", 0.0),
+                     "resumed": any(e["event"] == "resume" for e in events),
+                     "report": out.get("summary") or out.get("feedback") or ""})
+    rows.sort(key=lambda r: (r["ts"], r["agent"]))
+    return rows
+
+
 def read(path: str | Path) -> list[dict]:
     """Read a trajectory, skipping a partially-written trailing line."""
     out = []
