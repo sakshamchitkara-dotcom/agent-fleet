@@ -28,7 +28,7 @@ def home_dir(args) -> Path:
 def task_options(args) -> dict:
     opts = {k: getattr(args, k) for k in ("test_cmd", "sandbox", "image", "backend", "provider", "model", "effort",
                                           "max_workers", "review_rounds", "max_turns", "task_tokens", "max_cost",
-                                          "test_first", "pr")}
+                                          "test_first", "pr", "await_approval")}
     if args.script:
         opts["script"] = str(Path(args.script).resolve())
     return opts
@@ -56,11 +56,15 @@ def add_task_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-attempts", type=int, default=2, help="retries on crashes")
     p.add_argument("--pr", action="store_true",
                    help="push the branch and open a PR (only on repos you own)")
+    p.add_argument("--await-approval", action="store_true",
+                   help="with --pr: wait for `fleet approve` (or the dashboard) before opening the PR")
 
 
 def submit(args, repo: str, text: str, **extra) -> str:
     if args.backend == "scripted" and not args.script:
         sys.exit("--backend scripted needs --script")
+    if args.await_approval and not args.pr:
+        sys.exit("--await-approval only applies with --pr")
     if parse_github(repo) is None:  # local repo: store an absolute path, workers may run elsewhere
         repo = str(Path(repo).expanduser().resolve())
     q = Queue(home_dir(args) / "fleet.db")
@@ -168,6 +172,9 @@ def show(args, tid: str) -> None:
               + ", ".join(f"{n} {usd(a['cost'])}" for n, a in per_agent.items()) + ")")
     if t["pr_url"]:
         print(f"PR: {t['pr_url']}")
+    if t["status"] == "awaiting_approval":
+        print(f"awaiting approval: review with `git -C {r.get('repo')} diff {r.get('base', '')[:12]} {r.get('branch')}`, "
+              f"then `fleet approve {t['id']}` to open the PR or `fleet reject {t['id']}`")
     if t["error"]:
         print(f"error: {t['error'].strip().splitlines()[-1]}")
     print(f"trajectories: {home_dir(args) / 'runs' / t['id']}")
@@ -190,7 +197,8 @@ def cmd_logs(args) -> None:
                 stamp = time.strftime("%H:%M:%S", time.localtime(e["ts"]))
                 print(f"{stamp} {e['agent']:14} {describe(e)}", flush=True)
         task = queue.get(args.id)
-        if not args.follow or (not fresh and task and task["status"] in ("done", "failed", "cancelled")):
+        if not args.follow or (not fresh and task and task["status"] in ("done", "failed", "cancelled",
+                                                                          "awaiting_approval")):
             return
         time.sleep(1)
 
@@ -232,6 +240,23 @@ def cmd_retry(args) -> None:
             f.rename(dest / f.name)
         print(f"previous run kept in {dest}")
     print("requeued; run `fleet worker` to process it")
+
+
+def cmd_approve(args) -> None:
+    from .orchestrator import NotAwaitingApproval, approve
+    try:
+        print(f"PR: {approve(home_dir(args), Queue(home_dir(args) / 'fleet.db'), args.id)}")
+    except NotAwaitingApproval as e:
+        sys.exit(str(e))
+
+
+def cmd_reject(args) -> None:
+    from .orchestrator import NotAwaitingApproval, reject
+    try:
+        reject(Queue(home_dir(args) / "fleet.db"), args.id, args.reason)
+    except NotAwaitingApproval as e:
+        sys.exit(str(e))
+    print("rejected; the branch is kept, `fleet retry` starts over")
 
 
 def cmd_bench(args) -> None:
@@ -334,6 +359,15 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("retry", help="requeue a failed or cancelled task")
     p.add_argument("id")
     p.set_defaults(fn=cmd_retry)
+
+    p = sub.add_parser("approve", help="open the PR for a task awaiting approval")
+    p.add_argument("id")
+    p.set_defaults(fn=cmd_approve)
+
+    p = sub.add_parser("reject", help="decline a task awaiting approval (no PR)")
+    p.add_argument("id")
+    p.add_argument("--reason", default="")
+    p.set_defaults(fn=cmd_reject)
 
     p = sub.add_parser("bench", help="run the seeded-bug benchmark and report pass rate, turns, tokens")
     p.add_argument("--backend", choices=["auto", "claude", "scripted"], default="auto",

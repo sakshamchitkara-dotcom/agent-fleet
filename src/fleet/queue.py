@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     repo         TEXT NOT NULL,
     text         TEXT NOT NULL,
     options      TEXT NOT NULL DEFAULT '{}',
-    status       TEXT NOT NULL DEFAULT 'queued',  -- queued|running|done|failed|cancelled
+    status       TEXT NOT NULL DEFAULT 'queued',  -- queued|running|awaiting_approval|approved|done|failed|cancelled
     stage        TEXT NOT NULL DEFAULT '',
     attempts     INTEGER NOT NULL DEFAULT 0,
     max_attempts INTEGER NOT NULL DEFAULT 2,
@@ -94,6 +94,17 @@ class Queue:
             return db.execute("UPDATE tasks SET status='queued', attempts=MAX(attempts - 1, 0), "
                               "stage='interrupted', updated=? WHERE status='running'",
                               (time.time(),)).rowcount
+
+    def transition(self, tid: str, frm: str, to: str, **fields) -> bool:
+        """Atomically move a task from status `frm` to `to`; False if it was not in `frm`
+        (e.g. a second click on Approve while the first is opening the PR)."""
+        bad = set(fields) - UPDATABLE
+        if bad:
+            raise ValueError(f"cannot update {sorted(bad)}")
+        sets = "".join(f", {k}=?" for k in fields)
+        with self._db() as db:
+            return db.execute(f"UPDATE tasks SET status=?{sets}, updated=? WHERE id=? AND status=?",
+                              (to, *fields.values(), time.time(), tid, frm)).rowcount == 1
 
     def cancel(self, tid: str) -> bool:
         with self._db() as db:

@@ -76,3 +76,45 @@ def test_budget_exhaustion_is_the_reported_error(repo, tmp_path):
     t = q.get(tid)
     assert t["status"] == "failed" and t["error"].startswith("task budget exhausted")
     assert "of $0.00" in t["error"]
+
+
+def test_await_approval_then_approve_or_reject(repo, tmp_path, monkeypatch):
+    import pytest
+
+    from fleet.orchestrator import NotAwaitingApproval, approve, reject
+    opened = []
+    monkeypatch.setattr(Orchestrator, "open_pr",
+                        lambda self, task, result: opened.append(result["branch"]) or "https://example.invalid/pr/1")
+    q, opts = setup(tmp_path)
+    a, b = (q.submit(str(repo), "fix add", pr=True, await_approval=True, **opts) for _ in range(2))
+    Orchestrator(tmp_path / "home", q).run(drain=True, poll=0.05)
+    for tid in (a, b):
+        t = q.get(tid)
+        assert (t["status"], t["stage"], t["pr_url"]) == ("awaiting_approval", "awaiting approval", "")
+        assert t["result"]["tests_passed"]
+    assert opened == []  # nothing leaves the machine before sign-off
+
+    assert approve(tmp_path / "home", q, a) == "https://example.invalid/pr/1"
+    assert q.get(a)["status"] == "done" and q.get(a)["pr_url"].endswith("/pr/1") and opened == [f"fleet/{a}"]
+    with pytest.raises(NotAwaitingApproval):
+        approve(tmp_path / "home", q, a)  # a second click does not open a second PR
+    assert len(opened) == 1
+
+    reject(q, b, "wrong approach")
+    t = q.get(b)
+    assert t["status"] == "failed" and t["error"] == "rejected at approval: wrong approach" and len(opened) == 1
+    assert q.retry(b)  # a rejected task can be retried from scratch
+
+
+def test_failed_pr_on_approval_marks_task_failed(repo, tmp_path):
+    import pytest
+
+    from fleet import github
+    from fleet.orchestrator import approve
+    q, opts = setup(tmp_path)
+    tid = q.submit(str(repo), "fix add", pr=True, await_approval=True, **opts)
+    Orchestrator(tmp_path / "home", q).run(drain=True, poll=0.05)
+    with pytest.raises(github.NotOwnedError):  # local repo: PRs are refused even after approval
+        approve(tmp_path / "home", q, tid)
+    t = q.get(tid)
+    assert t["status"] == "failed" and "local repos stay local" in t["error"]
