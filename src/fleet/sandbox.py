@@ -3,8 +3,10 @@
 Every shell command an agent issues goes through `Sandbox.run`. Commands are
 checked against a denylist first, then executed either inside a throwaway
 Docker container (network disabled, only the workspace mounted) or, when
-Docker is unavailable, as a subprocess jailed to the workspace directory with
-a scrubbed environment and a hard timeout.
+Docker is unavailable, as a subprocess in the workspace directory with a
+scrubbed environment and a hard timeout, wrapped in the strongest OS jail
+available: `sandbox-exec` on macOS, bubblewrap or `unshare` on Linux.
+`Sandbox.isolation` says which one is in force.
 """
 
 from __future__ import annotations
@@ -15,7 +17,9 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -63,6 +67,54 @@ def ensure_image(image: str) -> None:
             raise RuntimeError(f"building sandbox image failed: {r.stderr.strip()[-2000:]}")
 
 
+# macOS Seatbelt profile: no network (unix sockets stay usable), writes only to
+# the worktree, a private TMPDIR and the usual /dev sinks. Reads are unrestricted.
+SEATBELT = """(version 1)
+(allow default)
+(deny network*)
+(allow network* (remote unix-socket))
+(deny file-write*)
+(allow file-write* (subpath {root}) (subpath {tmp}) (literal "/dev/null") (literal "/dev/zero")
+       (regex #"^/dev/tty") (regex #"^/dev/fd/"))
+"""
+
+ISOLATION = {
+    "docker": "docker: no network, only the worktree mounted",
+    "sandbox-exec": "sandbox-exec: no network, writes confined to the worktree",
+    "bwrap": "bwrap: no network, read-only root, writes confined to the worktree",
+    "unshare": "unshare: no network, writes NOT confined",
+    "none": "none: cwd jail only, network and writes NOT confined",
+}
+_jail_ok: dict[str, bool] = {}
+
+
+def _works(argv: list[str]) -> bool:
+    """Probe once whether a jail actually starts here (nested sandboxes and
+    disabled user namespaces make an installed tool unusable)."""
+    if argv[0] not in _jail_ok:
+        try:
+            _jail_ok[argv[0]] = bool(shutil.which(argv[0])) and subprocess.run(
+                argv, capture_output=True, timeout=10).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            _jail_ok[argv[0]] = False
+    return _jail_ok[argv[0]]
+
+
+def detect_jail() -> str:
+    if sys.platform == "darwin" and _works(["sandbox-exec", "-p", "(version 1)(allow default)", "/usr/bin/true"]):
+        return "sandbox-exec"
+    if sys.platform.startswith("linux"):
+        if _works(["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--unshare-net", "true"]):
+            return "bwrap"
+        if _works(["unshare", "-r", "-n", "true"]):
+            return "unshare"
+    return "none"
+
+
+def _sb_quote(path: str) -> str:
+    return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def check_command(cmd: str) -> str | None:
     """Return a reason string if `cmd` is denied, else None."""
     for pattern, why in _DENY:
@@ -102,7 +154,7 @@ class Sandbox:
     """Runs commands with the workspace as the only writable root."""
 
     def __init__(self, root: str | Path, mode: str = "auto", timeout: int = 120,
-                 image: str = DEFAULT_IMAGE):
+                 image: str = DEFAULT_IMAGE, jail: str = "auto"):
         self.root = Path(root).resolve()
         if mode == "auto":
             mode = "docker" if docker_available() else "subprocess"
@@ -113,18 +165,49 @@ class Sandbox:
         self.image = image
         if mode == "docker":
             ensure_image(image)
+            self.jail = "docker"
+        else:
+            self.jail = detect_jail() if jail == "auto" else jail
+            if self.jail not in ("sandbox-exec", "bwrap", "unshare", "none"):
+                raise ValueError(f"unknown jail {jail!r}")
+        self._tmp: str | None = None
+
+    @property
+    def isolation(self) -> str:
+        return ISOLATION[self.jail]
+
+    def tmpdir(self) -> str:
+        """Private TMPDIR for jailed commands: the only writable place besides the worktree."""
+        if self._tmp is None:
+            self._tmp = os.path.realpath(tempfile.mkdtemp(prefix="fleet-sbx-"))
+            weakref.finalize(self, shutil.rmtree, self._tmp, True)
+        return self._tmp
+
+    def _jail_argv(self, cmd: str) -> list[str]:
+        sh = ["/bin/sh", "-c", cmd]
+        root, tmp = str(self.root), self.tmpdir()
+        if self.jail == "sandbox-exec":
+            return ["sandbox-exec", "-p", SEATBELT.format(root=_sb_quote(root), tmp=_sb_quote(tmp)), *sh]
+        if self.jail == "bwrap":
+            return ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+                    "--bind", root, root, "--bind", tmp, tmp, "--unshare-net", "--die-with-parent",
+                    "--chdir", root, *sh]
+        if self.jail == "unshare":
+            return ["unshare", "-r", "-n", *sh]
+        return sh
 
     def run(self, cmd: str, timeout: int | None = None) -> Result:
         reason = check_command(cmd)
         if reason:
             return Result(126, f"command denied by sandbox policy: {reason}")
         timeout = timeout or self.timeout
-        argv = self._docker_argv(cmd) if self.mode == "docker" else ["/bin/sh", "-c", cmd]
+        argv = self._docker_argv(cmd) if self.mode == "docker" else self._jail_argv(cmd)
         env = {k: v for k, v in os.environ.items() if not SECRET_ENV.search(k)}
         # Stale .pyc files can mask same-second edits (mtime granularity); never write them.
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         if self.mode == "subprocess":  # `python` resolves to fleet's own interpreter
             env["PATH"] = os.path.dirname(sys.executable) + os.pathsep + env.get("PATH", "")
+            env["TMPDIR"] = self.tmpdir()
         proc = subprocess.Popen(
             argv, cwd=self.root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL, start_new_session=True, text=True, errors="replace",
