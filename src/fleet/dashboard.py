@@ -137,7 +137,8 @@ def make_handler(home: Path):
                     return self.json({"error": "not found"}, 404)
                 runs = home / "runs" / parts[2]
                 logs = [(f.stem, read(f)) for f in runs.glob("*.jsonl")]
-                logs.sort(key=lambda kv: kv[1][0]["ts"] if kv[1] else 0)  # in start order
+                # start order; name breaks ties (glob order differs across filesystems)
+                logs.sort(key=lambda kv: (kv[1][0]["ts"] if kv[1] else 0, kv[0]))
                 agents = {name: evs[-300:] for name, evs in logs}
                 return self.json({"task": task, "agents": agents})
             self.json({"error": "not found"}, 404)
