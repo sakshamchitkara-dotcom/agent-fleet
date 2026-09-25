@@ -1,17 +1,19 @@
 from fleet.agent import Agent, Budget, validate
 from fleet.models import Reply, ScriptedModel
+from fleet.roles import READ_ONLY, WORKER, Role
 from fleet.tools import Toolbox
 from fleet.trajectory import Trajectory, read
 
 FINISH = {"type": "object", "properties": {"summary": {"type": "string"}},
           "required": ["summary"], "additionalProperties": False}
+ROLE = Role("worker", "sys", WORKER.tools, "done", FINISH)
 
 
-def make_agent(repo, tmp_path, script, budget=None, model=None):
+def make_agent(repo, tmp_path, script, budget=None, model=None, role=ROLE):
     tb = Toolbox(repo, test_cmd="python3 -m unittest -q")
     model = model or ScriptedModel(script, "worker-1")
     traj = Trajectory(tmp_path / "t.jsonl", "worker-1")
-    return Agent("worker-1", "sys", model, tb, traj, FINISH, "done", budget), tmp_path / "t.jsonl"
+    return Agent("worker-1", role, model, tb, traj, budget), tmp_path / "t.jsonl"
 
 
 FIX = {"worker": [
@@ -113,3 +115,12 @@ def test_validate():
     assert validate({"b": 1}, s)
     assert validate({"b": "x", "c": 1}, s)
     assert validate("nope", s)
+
+
+def test_role_tool_allowlist_enforced(repo, tmp_path):
+    ro = Role("reviewer", "sys", READ_ONLY, "done", FINISH)
+    script = {"worker": [[{"name": "write_file", "input": {"path": "x.py", "content": "x"}}]]}
+    agent, log = make_agent(repo, tmp_path, script, Budget(max_turns=1), role=ro)
+    agent.run("x")
+    assert not (repo / "x.py").exists()
+    assert "unknown tool" in [r for r in read(log) if r["event"] == "tool"][0]["output"]

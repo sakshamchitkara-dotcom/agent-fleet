@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
+from .roles import Role
 from .tools import Toolbox, ToolError
 from .trajectory import Trajectory
 
@@ -49,15 +50,15 @@ def validate(args, schema: dict) -> str | None:
 
 
 class Agent:
-    def __init__(self, name: str, system: str, model, toolbox: Toolbox, trajectory: Trajectory,
-                 finish_schema: dict, finish_description: str, budget: Budget | None = None):
+    def __init__(self, name: str, role: Role, model, toolbox: Toolbox, trajectory: Trajectory,
+                 budget: Budget | None = None):
         self.name = name
-        self.system = system
+        self.system = role.system
         self.model = model
         self.toolbox = toolbox
         self.log = trajectory
         self.budget = budget or Budget()
-        self.tools = toolbox.schemas(finish_schema, finish_description)
+        self.tools = toolbox.schemas(role.finish_schema, role.finish_description, role.tools)
         self.schemas = {t["name"]: t["input_schema"] for t in self.tools}
 
     def run(self, task: str) -> AgentResult:
