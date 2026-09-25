@@ -110,6 +110,9 @@ def show(args, tid: str) -> None:
             print(f"  - [{s['verdict']}] {s['title']} ({len(s['rounds'])} round(s))")
         if r.get("diffstat"):
             print(r["diffstat"])
+        if r.get("tokens"):
+            per = ", ".join(f"{a} {n:,}" for a, n in r["tokens"]["by_agent"].items())
+            print(f"tokens: {r['tokens']['total']:,} ({per})")
     if t["pr_url"]:
         print(f"PR: {t['pr_url']}")
     if t["error"]:
