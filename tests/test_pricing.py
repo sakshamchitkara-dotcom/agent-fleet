@@ -47,6 +47,8 @@ def test_price_file_overrides_list_prices(tmp_path, monkeypatch):
     assert cost("claude-opus-5-5", m) == 24.0                     # other IDs keep list prices
     c = {"input_tokens": 3_000_000, "cache_read_input_tokens": 1_000_000, "cache_creation_input_tokens": 1_000_000}
     assert abs(cost("claude-haiku-4-5@20251001", c) - (1 + 0.2 + 2)) < 1e-9  # via the first-party ID
+    f.write_text(json.dumps({"claude-opus-5-5": {"input": 4.4, "output": 22}}))
+    assert cost(None, m) == 4.4 + 22  # no model ID (scripted backend) = the default model's rates
     f.write_text('{"x": {"output": 1}}')
     with pytest.raises(ValueError, match="bad price file"):
         load_prices(f)

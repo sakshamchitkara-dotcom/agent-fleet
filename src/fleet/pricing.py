@@ -63,21 +63,25 @@ def load_prices(path: str | Path) -> dict[str, tuple[float, float, float, float]
 
 
 @lru_cache(maxsize=4)
-def _overrides(path: str, mtime: float) -> dict:
+def _overrides(path: str, mtime_ns: int, size: int) -> dict:
     return load_prices(path)
 
 
 def overrides() -> dict:
     """Rates from the JSON file named by $FLEET_PRICES (set by `fleet --prices`), if any."""
     path = os.environ.get("FLEET_PRICES")
-    return _overrides(path, os.stat(path).st_mtime) if path else {}
+    if not path:
+        return {}
+    st = os.stat(path)
+    return _overrides(path, st.st_mtime_ns, st.st_size)
 
 
 def price(model: str | None) -> tuple[float, float, float, float]:
     """(input, output, cache read, cache write) $/MTok. Custom rates win (exact ID, then the
     first-party ID); unknown models (and the scripted backend) are priced as the default model."""
+    model = model or DEFAULT_MODEL
     custom = overrides()
-    if (hit := custom.get(model or "") or custom.get(canonical(model))):
+    if (hit := custom.get(model) or custom.get(canonical(model))):
         return hit
     inp, out, read = PRICES.get(canonical(model), PRICES[DEFAULT_MODEL])
     return inp, out, read, inp * CACHE_WRITE
