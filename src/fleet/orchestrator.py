@@ -33,6 +33,13 @@ def models_for(task: dict) -> ModelFactory:
                         model=o.get("model", "claude-opus-5-5"), effort=o.get("effort", "high"))
 
 
+def permanent(exc: Exception) -> bool:
+    """Client-side API errors that will fail the same way on retry."""
+    import anthropic
+    return isinstance(exc, anthropic.APIStatusError) and exc.status_code < 500 \
+        and exc.status_code not in (408, 409, 429)
+
+
 class Orchestrator:
     def __init__(self, home: str | Path, queue: Queue, concurrency: int = 2):
         self.home = Path(home)
@@ -58,8 +65,12 @@ class Orchestrator:
         try:
             result = Pipeline(spec_for(task), models_for(task), self.home,
                               lambda stage: self.queue.update(tid, stage=stage)).run()
-        except Exception:
-            status = self.queue.fail(tid, traceback.format_exc())
+        except Exception as e:
+            if permanent(e):  # e.g. 400/401/403/404 from the API: retrying cannot help
+                self.queue.update(tid, status="failed", error=traceback.format_exc())
+                status = "failed"
+            else:
+                status = self.queue.fail(tid, traceback.format_exc())
             log.exception("task %s crashed; now %s", tid, status)
             return
         success = bool(result["branch"]) and result["tests_passed"]
