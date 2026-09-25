@@ -66,7 +66,8 @@ class ClaudeModel:
             usage={"input_tokens": u.input_tokens + (u.cache_read_input_tokens or 0)
                    + (u.cache_creation_input_tokens or 0),
                    "output_tokens": u.output_tokens,
-                   "cache_read_input_tokens": u.cache_read_input_tokens or 0},
+                   "cache_read_input_tokens": u.cache_read_input_tokens or 0,
+                   "cache_creation_input_tokens": u.cache_creation_input_tokens or 0},
         )
 
     def summarize(self, transcript: str) -> str:
