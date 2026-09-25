@@ -14,7 +14,8 @@ from . import github
 from .orchestrator import Orchestrator, short_title
 from .queue import Queue
 from .sandbox import DEFAULT_IMAGE
-from .trajectory import isolation, read
+from .pricing import usd
+from .trajectory import isolation, read, spend
 from .workspace import parse_github
 
 
@@ -95,11 +96,12 @@ def cmd_status(args) -> None:
     if args.id:
         return show(args, args.id)
     rows = Queue(home_dir(args) / "fleet.db").list(args.limit)
-    print(f"{'ID':8}  {'STATUS':9}  {'STAGE':24}  {'TRY':3}  {'AGE':>6}  TASK")
+    print(f"{'ID':8}  {'STATUS':9}  {'STAGE':24}  {'TRY':3}  {'AGE':>6}  {'COST':>8}  TASK")
     for t in rows:
         age = _age(time.time() - t["created"])
+        cost = usd(sum(a["cost"] for a in spend(home_dir(args) / "runs" / t["id"]).values()))
         text = t["text"].splitlines()[0][:50] if t["text"] else ""
-        print(f"{t['id']:8}  {t['status']:9}  {t['stage'][:24]:24}  {t['attempts']:3}  {age:>6}  "
+        print(f"{t['id']:8}  {t['status']:9}  {t['stage'][:24]:24}  {t['attempts']:3}  {age:>6}  {cost:>8}  "
               f"{text}{'  ' + t['pr_url'] if t['pr_url'] else ''}")
 
 
@@ -118,9 +120,14 @@ def show(args, tid: str) -> None:
             print(f"  - [{s['verdict']}] {s['title']} ({len(s['rounds'])} round(s))")
         if r.get("diffstat"):
             print(r["diffstat"])
-        if r.get("tokens"):
-            per = ", ".join(f"{a} {n:,}" for a, n in r["tokens"]["by_agent"].items())
-            print(f"tokens: {r['tokens']['total']:,} ({per})")
+    per_agent = spend(home_dir(args) / "runs" / t["id"])
+    if per_agent:
+        tokens = sum(a["tokens"] for a in per_agent.values())
+        cost = sum(a["cost"] for a in per_agent.values())
+        cap = t["options"].get("max_cost")
+        print(f"tokens: {tokens:,} (" + ", ".join(f"{n} {a['tokens']:,}" for n, a in per_agent.items()) + ")")
+        print(f"cost: {usd(cost)} est." + (f" of {usd(cap)} budget" if cap else "") + " ("
+              + ", ".join(f"{n} {usd(a['cost'])}" for n, a in per_agent.items()) + ")")
     if t["pr_url"]:
         print(f"PR: {t['pr_url']}")
     if t["error"]:
@@ -159,7 +166,7 @@ def describe(e: dict) -> str:
         text = " ".join(b.get("text", "") for b in e.get("content", []) if b.get("type") == "text")
         return f"~ turn {e['turn']} ({e['stop_reason']}) {text[:120]}".rstrip()
     if kind == "end":
-        return f"= {e['status']} after {e['turns']} turns, {e['tokens']} tokens"
+        return f"= {e['status']} after {e['turns']} turns, {e['tokens']} tokens, {usd(e.get('cost', 0))}"
     if kind == "start":
         return f"+ start: {e['task'].splitlines()[0][:100]}"
     return f"# {kind}"

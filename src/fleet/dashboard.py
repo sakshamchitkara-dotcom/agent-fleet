@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .queue import Queue
-from .trajectory import isolation, read
+from .trajectory import isolation, read, spend
 
 TASK_ID = re.compile(r"^[0-9a-f]{8}$")
 
@@ -49,6 +49,7 @@ PAGE = """<!doctype html>
 const el = (tag, attrs = {}, ...kids) => { const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) k === "class" ? e.className = v : e.setAttribute(k, v);
   for (const k of kids) e.append(k); return e; };
+const usd = c => c < 1 ? `$${(c || 0).toFixed(4)}` : `$${c.toFixed(2)}`;
 const ago = t => { const s = Date.now()/1000 - t; return s < 60 ? `${s|0}s` : s < 3600 ? `${s/60|0}m` : `${s/3600|0}h`; };
 const m = location.pathname.match(/^\\/task\\/([0-9a-f]{8})$/);
 
@@ -57,7 +58,7 @@ function describe(e) {
   if (e.event === "model") { const t = (e.content || []).filter(b => b.type === "text").map(b => b.text).join(" ");
     return `~ turn ${e.turn} (${e.stop_reason}) ${t.slice(0, 300)}`; }
   if (e.event === "start") return `+ start (${(e.isolation || e.sandbox || "?").split(":")[0]} sandbox): ${e.task.split("\\n").find(l => l.trim() && !/^(Overall )?task:$/i.test(l.trim())) || ""}`.slice(0, 200);
-  if (e.event === "end") return `= ${e.status} after ${e.turns} turns, ${e.tokens} tokens`;
+  if (e.event === "end") return `= ${e.status} after ${e.turns} turns, ${e.tokens} tokens, ${usd(e.cost)}`;
   if (e.event === "compact") return `# compacted ${e.messages_before} messages`;
   return `# ${e.event}`;
 }
@@ -68,9 +69,9 @@ async function list() {
     el("td", {}, el("a", {href: `/task/${t.id}`}, t.id)),
     el("td", {class: `s-${t.status}`}, t.status), el("td", {}, t.stage),
     el("td", {}, t.repo), el("td", {}, (t.text.split("\\n")[0] || "").slice(0, 80)),
-    el("td", {}, t.pr_url ? el("a", {href: t.pr_url}, "PR") : ""),
+    el("td", {}, t.pr_url ? el("a", {href: t.pr_url}, "PR") : ""), el("td", {}, usd(t.cost)),
     el("td", {class: "muted"}, ago(t.created))));
-  const table = el("table", {}, el("tr", {}, ...["id","status","stage","repo","task","pr","age"].map(h => el("th", {}, h))), ...rows);
+  const table = el("table", {}, el("tr", {}, ...["id","status","stage","repo","task","pr","cost","age"].map(h => el("th", {}, h))), ...rows);
   document.getElementById("app").replaceChildren(tasks.length ? el("div", {class: "table-wrap"}, table) : "No tasks yet. Try: fleet run <repo> \\"<task>\\"");
   document.getElementById("app").classList.remove("muted");
 }
@@ -83,6 +84,9 @@ async function detail(id) {
     el("p", {}, el("b", {class: `s-${t.status}`}, t.status), ` - ${t.stage} - attempt ${t.attempts}/${t.max_attempts} - `,
       t.repo, t.pr_url ? " - " : "", t.pr_url ? el("a", {href: t.pr_url}, t.pr_url) : ""),
     el("pre", {}, t.text));
+  const spent = Object.values(d.spend).reduce((a, s) => ({tokens: a.tokens + s.tokens, cost: a.cost + s.cost}), {tokens: 0, cost: 0});
+  head.append(el("p", {}, `cost ${usd(spent.cost)} est.` + (d.max_cost ? ` of ${usd(d.max_cost)} budget` : "") +
+    ` - ${spent.tokens.toLocaleString()} tokens`));
   if (d.isolation) head.append(el("p", {class: /NOT confined/.test(d.isolation) ? "s-failed" : "muted"},
     `sandbox: ${d.isolation}`));
   if (r.branch !== undefined) head.append(el("p", {}, `branch ${r.branch} - tests ${r.tests_passed ? "PASS" : "FAIL"}`),
@@ -94,7 +98,7 @@ async function detail(id) {
     const log = el("div", {class: "log"}, ...evs.map(e => el("div",
       {class: `ev ${e.event}${e.is_error ? " err" : ""}`}, describe(e))));
     agents.append(el("div", {class: "agent"}, el("h2", {}, name,
-      el("span", {class: "muted"}, last.event === "end" ? last.status : "running")), log));
+      el("span", {class: "muted"}, `${usd((d.spend[name] || {}).cost)} - ${last.event === "end" ? last.status : "running"}`)), log));
   }
   document.getElementById("app").replaceChildren(head, agents);
   document.getElementById("app").classList.remove("muted");
@@ -131,8 +135,10 @@ def make_handler(home: Path):
             if path == "/" or (len(parts) == 2 and parts[0] == "task" and TASK_ID.match(parts[1])):
                 return self.send(200, PAGE.encode(), "text/html; charset=utf-8")
             if path == "/api/tasks":
-                return self.json([{k: t[k] for k in ("id", "status", "stage", "repo", "text", "pr_url",
-                                                     "created", "attempts")} for t in queue.list(100)])
+                return self.json([{**{k: t[k] for k in ("id", "status", "stage", "repo", "text", "pr_url",
+                                                        "created", "attempts")},
+                                   "cost": sum(a["cost"] for a in spend(home / "runs" / t["id"]).values())}
+                                  for t in queue.list(100)])
             if len(parts) == 3 and parts[:2] == ["api", "task"] and TASK_ID.match(parts[2]):
                 task = queue.get(parts[2])
                 if task is None:
@@ -142,7 +148,8 @@ def make_handler(home: Path):
                 # start order; name breaks ties (glob order differs across filesystems)
                 logs.sort(key=lambda kv: (kv[1][0]["ts"] if kv[1] else 0, kv[0]))
                 agents = {name: evs[-300:] for name, evs in logs}
-                return self.json({"task": task, "agents": agents, "isolation": isolation(runs)})
+                return self.json({"task": task, "agents": agents, "isolation": isolation(runs),
+                                  "spend": spend(runs), "max_cost": task["options"].get("max_cost")})
             self.json({"error": "not found"}, 404)
 
     return Handler
