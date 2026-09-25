@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable
 
@@ -17,6 +17,8 @@ from .trajectory import Trajectory, summarize
 from .workspace import add_worktree, commit_all, head, ident, prepare_repo, remove_worktree
 
 MAX_SUBTASKS = 4
+CONVENTION_FILES = ("AGENTS.md", "CLAUDE.md")
+MAX_CONVENTIONS = 20_000  # chars; these files ride along in every agent's system prompt
 CONFLICT = re.compile(r"^(<{7}|>{7})( |$)", re.M)
 @dataclass
 class TaskSpec:
@@ -34,6 +36,28 @@ class TaskSpec:
     test_first: bool = False        # a tester adds a failing regression test before each fix
 
 
+def conventions(repo: Path, base: str) -> str:
+    """The repo's agent instructions (AGENTS.md, CLAUDE.md at the root, as of `base`) as a
+    system-prompt section. Read from the base commit, so no agent's edit can change what later
+    agents are told; a symlink (CLAUDE.md -> AGENTS.md) or an identical copy is read once."""
+    seen, parts = set(), []
+    for line in git(repo, "ls-tree", base, "--", *CONVENTION_FILES).splitlines():
+        meta, name = line.split("\t", 1)
+        if meta.split()[0] not in ("100644", "100755"):
+            continue  # symlink or submodule
+        text = git(repo, "show", f"{base}:{name}").strip()
+        if text and text not in seen:
+            seen.add(text)
+            parts.append(f'<repo_conventions file="{name}">\n{text}\n</repo_conventions>')
+    if not parts:
+        return ""
+    body = "\n\n".join(parts)
+    if len(body) > MAX_CONVENTIONS:
+        body = body[:MAX_CONVENTIONS] + "\n[... truncated]"
+    return ("\n\nThe repository's maintainers wrote these instructions for coding agents. Follow its "
+            "conventions (style, commands, layout) unless they conflict with your role above.\n\n" + body)
+
+
 class Pipeline:
     def __init__(self, spec: TaskSpec, models: Callable, home: Path,
                  progress: Callable[[str], None] = lambda stage: None):
@@ -46,6 +70,7 @@ class Pipeline:
         self.repo: Path | None = None
         self.base = ""
         self._integrator_runs = 0
+        self.conventions = ""
         self.meter = TokenMeter(spec.task_tokens, spec.max_cost)
 
     # -- helpers ----------------------------------------------------------
@@ -56,6 +81,8 @@ class Pipeline:
         return Toolbox(wt, Sandbox(wt, mode=self.spec.sandbox, image=self.spec.image), self.spec.test_cmd)
 
     def agent(self, name: str, role: Role, wt: Path, resume: bool = True) -> Agent:
+        if self.conventions:
+            role = replace(role, system=role.system + self.conventions)
         return Agent(name, role, self.models(name), self.toolbox(wt),
                      Trajectory(self.runs / f"{name}.jsonl", name), self.spec.budget, self.meter, resume)
 
@@ -78,6 +105,7 @@ class Pipeline:
         self.base = base_file.read_text().strip() if resuming and base_file.exists() else head(self.repo)
         self.runs.mkdir(parents=True, exist_ok=True)
         base_file.write_text(self.base)
+        self.conventions = conventions(self.repo, self.base)
         # Worktrees survive a crash so a retry or a restarted orchestrator resumes the
         # agents' checkpoints against the files they were editing; cleanup() on success.
         subtasks, plan = self.plan()

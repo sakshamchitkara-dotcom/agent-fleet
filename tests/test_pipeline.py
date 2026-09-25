@@ -250,3 +250,36 @@ def test_worker_edits_to_the_regression_test_are_reverted(repo, tmp_path):
     r2 = read(runs / "worker-1.r2.jsonl")[0]["task"]
     assert "You changed the regression test (test_regression.py); it has been restored" in r2
     assert result["tests_passed"]
+
+
+def test_repo_conventions_reach_every_agents_system_prompt(repo, tmp_path):
+    import json
+    import os
+    (repo / "AGENTS.md").write_text("Use tabs. Run `make check` before finishing.\n")
+    os.symlink("AGENTS.md", repo / "CLAUDE.md")
+    git(repo, "add", "-A")
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "agent docs")
+    p = tmp_path / "script.json"
+    p.write_text(json.dumps({"planner": ONE_PLAN, "worker": FIX, "reviewer": APPROVE}))
+    scripted, systems = ModelFactory("scripted", script=p), {}
+
+    class Spy:
+        def __init__(self, name):
+            self.name, self.inner = name, scripted(name)
+
+        def complete(self, system, messages, tools):
+            systems[self.name] = system
+            return self.inner.complete(system, messages, tools)
+
+    spec = TaskSpec("t1", str(repo), "Fix the failing test", test_cmd="python3 -m unittest -q",
+                    sandbox="subprocess", budget=Budget(max_turns=10))
+    Pipeline(spec, Spy, tmp_path / "home").run()
+    assert set(systems) == {"planner", "worker-1", "reviewer-1"}
+    for system in systems.values():
+        assert system.count("Use tabs.") == 1  # the symlinked CLAUDE.md is not read twice
+        assert '<repo_conventions file="AGENTS.md">' in system
+
+
+def test_no_convention_files_leaves_the_prompt_alone(repo):
+    from fleet.pipeline import conventions
+    assert conventions(repo, "HEAD") == ""

@@ -217,6 +217,12 @@ input; the agent then continues in a fresh context that starts from those notes,
 replaying any earlier thinking. The summary call is priced and charged like any turn. `refusal` stop reasons end the agent cleanly;
 400/401/403/404 API errors fail the task without burning retries, while 429/5xx are retried.
 
+**Repository conventions.** If the repo has an `AGENTS.md` and/or `CLAUDE.md` at its root,
+their text (as of the task's base commit, 20k characters at most, a symlinked or identical
+copy read once) is appended to every agent's system prompt, so planner, tester, workers,
+reviewers and integrator all follow the project's own style and commands. Being part of the
+system block, it stays inside the cached tools + system prefix.
+
 `--provider bedrock` uses the SDK's `AnthropicBedrockMantle` client (`AWS_REGION` and the
 usual AWS credentials; model IDs get the `anthropic.` prefix, inference profiles such as
 `us.anthropic.claude-opus-5-5` pass through), `--provider vertex` uses `AnthropicVertex`
