@@ -20,6 +20,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"  # >= 22.18 runs the TypeScript bench case without a build step
       - name: Install bubblewrap (Linux jail for the subprocess sandbox)
         run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends bubblewrap
       - name: Allow unprivileged user namespaces (Ubuntu 24.04's AppArmor default blocks bwrap)

@@ -1,0 +1,2 @@
+{"task": "lastN(xs, 0) in src/lastn.ts returns the whole array instead of an empty one, and a negative n should also give an empty array.",
+ "test_cmd": "node --test tests/lastn.test.ts"}
