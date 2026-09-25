@@ -140,7 +140,7 @@ fleet bench             # 7 seeded-bug repos: pass rate, turns, tokens, cost
 fleet status            # all tasks, with estimated cost
 fleet status <id>       # one task: sandbox isolation, subtasks, verdicts, diffstat, tokens, cost, PR
 fleet logs <id> -f      # stream every agent's trajectory
-fleet serve             # dashboard on http://127.0.0.1:8765
+fleet serve             # dashboard; open the printed http://127.0.0.1:8765/?token=... link
 ```
 
 Queue now, run later: `fleet submit <repo> "<task>"` then `fleet worker --concurrency 3`
@@ -163,6 +163,10 @@ Useful options: `--max-workers` (parallel workers per task), `--review-rounds`,
   nothing is pushed until a human approves the finished change (`fleet approve` or the
   dashboard, whose POST endpoints accept only same-origin JSON requests, so another web page
   cannot approve for you). A second approval cannot open a second PR.
+- **Dashboard access token.** `fleet serve` requires a token (random per start, or `--token` /
+  `FLEET_DASHBOARD_TOKEN`) on every page and API call, so other users of the machine can't
+  read trajectories or approve; the printed link trades it for an `HttpOnly`,
+  `SameSite=Strict` cookie. `--no-auth` turns this off.
 - **Owned repos only.** Before any push the authenticated `gh` login must equal the repo
   owner, the API must report that owner with admin permission, and the clone's `origin` must
   be exactly `https://github.com/<owner>/<repo>`. Anything else raises `NotOwnedError`;

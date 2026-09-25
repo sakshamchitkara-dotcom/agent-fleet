@@ -290,7 +290,8 @@ def cmd_bench(args) -> None:
 
 def cmd_serve(args) -> None:
     from .dashboard import serve
-    serve(home_dir(args), args.host, args.port)
+    serve(home_dir(args), args.host, args.port,
+          None if args.no_auth else args.token or os.environ.get("FLEET_DASHBOARD_TOKEN", ""))
 
 
 def _age(seconds: float) -> str:
@@ -391,6 +392,8 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("serve", help="web dashboard")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--token", help="access token (default: $FLEET_DASHBOARD_TOKEN, else a random one)")
+    p.add_argument("--no-auth", action="store_true", help="serve without an access token")
     p.set_defaults(fn=cmd_serve)
 
     args = ap.parse_args(argv)
