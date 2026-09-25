@@ -112,7 +112,7 @@ class ScriptedModel:
         if self.cursor < len(self.turns):
             turn = self.turns[self.cursor]
         else:
-            turn = [{"name": "finish", "input": {"summary": "script exhausted"}}]
+            turn = [{"name": "finish", "input": _exhausted_finish(tools)}]
         n = self.cursor
         self.cursor += 1
         blocks = []
@@ -130,6 +130,21 @@ class ScriptedModel:
     def summarize(self, transcript: str) -> str:
         self.summaries += 1
         return f"[scripted summary #{self.summaries}] {len(transcript)} chars of history compacted."
+
+
+def _exhausted_finish(tools: list[dict]) -> dict:
+    """A schema-valid finish() input for when the script runs out.
+
+    Enums take their last option - for the reviewer that is request_changes,
+    so an exhausted script never approves anything.
+    """
+    schema = next((t["input_schema"] for t in tools if t["name"] == "finish"), {})
+    defaults = {"string": "script exhausted", "boolean": False, "integer": 0, "array": [], "object": {}}
+    out = {}
+    for key in schema.get("required", []):
+        prop = schema["properties"][key]
+        out[key] = prop["enum"][-1] if "enum" in prop else defaults.get(prop.get("type"), None)
+    return out
 
 
 class ModelFactory:
