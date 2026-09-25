@@ -1,8 +1,9 @@
 {
   "planner": [
     [{"name": "run_tests", "input": {}},
-     {"name": "grep", "input": {"pattern": "def apply_discount|apply_discount\\(", "path": "shop"}}],
-    [{"name": "read_file", "input": {"path": "shop/pricing.py"}}],
+     {"name": "repo_map", "input": {}}],
+    [{"name": "search_symbols", "input": {"query": "apply_discount|cart_total"}},
+     {"name": "read_file", "input": {"path": "shop/pricing.py"}}],
     [{"name": "finish", "input": {
       "summary": "Single root cause: apply_discount computes the discount amount instead of the discounted price; cart_total is fixed through it.",
       "subtasks": [
