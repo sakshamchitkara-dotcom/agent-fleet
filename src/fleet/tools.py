@@ -7,6 +7,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from . import index
 from .sandbox import Sandbox, _truncate
 
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache"}
@@ -25,6 +26,15 @@ _S = {"type": "string"}
 _I = {"type": "integer"}
 
 SCHEMAS = {
+    "repo_map": ("Map of the repository: the file tree with each source file's top-level symbols "
+                 "(functions, classes, methods, constants) and their line numbers. Start here to "
+                 "find where things live; pass a sub-path to zoom in.",
+                 _obj({"path": _S}, [])),
+    "search_symbols": ("Find function/class/method definitions by name (case-insensitive regex). "
+                       "Returns path:line kind name(signature). Faster than grep for 'where is X "
+                       "defined'. Optional kind filter: def, class, method, const, function, func, "
+                       "fn, type.",
+                       _obj({"query": _S, "kind": _S}, ["query"])),
     "read_file": ("Read a text file from the repository. Returns numbered lines. Use start/end "
                   "(1-based, inclusive) for large files.",
                   _obj({"path": _S, "start": _I, "end": _I}, ["path"])),
@@ -117,6 +127,17 @@ class Toolbox:
                     if len(hits) >= 200:
                         return "\n".join(hits) + "\n... (more matches truncated)"
         return "\n".join(hits) or "no matches"
+
+    def t_repo_map(self, path: str = ".") -> str:
+        base = self.resolve(path)
+        if not base.is_dir():
+            raise ToolError(f"{path} is not a directory")
+        return index.repo_map(self.root, base)
+
+    def t_search_symbols(self, query: str, kind: str | None = None) -> str:
+        if not query.strip():
+            raise ToolError("query must not be empty")
+        return index.search_symbols(self.root, query, kind)
 
     def t_write_file(self, path: str, content: str) -> str:
         p = self.resolve(path)
