@@ -209,7 +209,7 @@ class Agent:
         stays valid under preserved thinking (no in-place history edits). The
         summary call is a real request: it is charged to the agent and the task.
         """
-        summary, usage = self.model.summarize(render_transcript(messages))
+        summary, usage = self.model.summarize(self.system, messages, self.tools)
         used = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
         usd = pricing.cost(model_id, usage)
         self.meter.charge(self.name, used, usd)
