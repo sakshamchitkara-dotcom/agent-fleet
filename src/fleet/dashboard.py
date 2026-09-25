@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import hmac
 import json
 import re
+import secrets
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs
 
 from .queue import Queue
 from .trajectory import isolation, read, spend
@@ -143,7 +147,9 @@ tick(); setInterval(tick, 2000);
 """
 
 
-def make_handler(home: Path):
+def make_handler(home: Path, token: str | None = None):
+    """`token`: when set, every request needs it - as `?token=` on a page URL (answered with a
+    cookie and a redirect to the clean URL), the cookie, or `Authorization: Bearer`."""
     from .orchestrator import NotAwaitingApproval, approve, reject
     queue = Queue(home / "fleet.db")
 
@@ -162,9 +168,34 @@ def make_handler(home: Path):
         def json(self, obj, code: int = 200) -> None:
             self.send(code, json.dumps(obj, default=str).encode(), "application/json")
 
+        def cookie_name(self) -> str:  # cookies ignore ports: one per dashboard port
+            return f"fleet_token_{self.server.server_address[1]}"
+
+        def authorized(self) -> bool:
+            if token is None:
+                return True
+            got = self.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+            if not got:
+                jar = SimpleCookie(self.headers.get("Cookie", ""))
+                got = jar[self.cookie_name()].value if self.cookie_name() in jar else ""
+            return hmac.compare_digest(got.encode(), token.encode())
+
         def do_GET(self):
-            path = self.path.split("?")[0]
+            path, _, query = self.path.partition("?")
             parts = path.strip("/").split("/")
+            if token is not None and (given := parse_qs(query).get("token")):
+                if not hmac.compare_digest(given[0].encode(), token.encode()):
+                    return self.json({"error": "bad token"}, 401)
+                self.send_response(303)
+                self.send_header("Set-Cookie", f"{self.cookie_name()}={token}; Path=/; HttpOnly; SameSite=Strict")
+                self.send_header("Location", path)
+                self.send_header("Content-Length", "0")
+                return self.end_headers()
+            if not self.authorized():
+                if path.startswith("/api/"):
+                    return self.json({"error": "unauthorized"}, 401)
+                return self.send(401, b"Open the link printed by `fleet serve` (it carries the access token).",
+                                 "text/plain; charset=utf-8")
             if path == "/" or (len(parts) == 2 and parts[0] == "task" and TASK_ID.match(parts[1])):
                 return self.send(200, PAGE.encode(), "text/html; charset=utf-8")
             if path == "/api/tasks":
@@ -201,6 +232,8 @@ def make_handler(home: Path):
             if not (len(parts) == 4 and parts[:2] == ["api", "task"] and TASK_ID.match(parts[2])
                     and parts[3] in ("approve", "reject")):
                 return self.json({"error": "not found"}, 404)
+            if not self.authorized():
+                return self.json({"error": "unauthorized"}, 401)
             if not self.same_origin():
                 return self.json({"error": "forbidden"}, 403)
             try:
@@ -218,9 +251,11 @@ def make_handler(home: Path):
     return Handler
 
 
-def serve(home: Path, host: str = "127.0.0.1", port: int = 8765) -> None:
-    server = ThreadingHTTPServer((host, port), make_handler(Path(home)))
-    print(f"dashboard on http://{host}:{port}")
+def serve(home: Path, host: str = "127.0.0.1", port: int = 8765, token: str | None = "") -> None:
+    """`token=""` generates a random one; None turns authentication off."""
+    token = secrets.token_urlsafe(24) if token == "" else token
+    server = ThreadingHTTPServer((host, port), make_handler(Path(home), token))
+    print(f"dashboard on http://{host}:{port}/" + (f"?token={token}" if token else " (no authentication)"))
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -87,3 +87,35 @@ def test_approve_and_reject_from_the_dashboard(server, tmp_path, monkeypatch):
     assert post(f"{base}/api/task/{b}/reject", b'{"reason": "too broad"}')[0] == 200
     assert q.get(b)["error"] == "rejected at approval: too broad"
     assert post(f"{base}/api/task/{b}/delete")[0] == 404
+
+
+def test_access_token(tmp_path):
+    q = Queue(tmp_path / "fleet.db")
+    tid = q.submit("o/r", "x")
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(tmp_path, token="s3cret"))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        for path in ("/", "/api/tasks", f"/api/task/{tid}", "/?token=wrong"):
+            with pytest.raises(urllib.error.HTTPError) as e:
+                get(base + path)
+            assert e.value.code == 401, path
+        assert post(f"{base}/api/task/{tid}/approve")[0] == 401
+
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *args):
+                return None
+        with pytest.raises(urllib.error.HTTPError) as e:  # token link: cookie + redirect to clean URL
+            urllib.request.build_opener(NoRedirect).open(f"{base}/task/{tid}?token=s3cret")
+        assert e.value.code == 303 and e.value.headers["Location"] == f"/task/{tid}"
+        cookie = e.value.headers["Set-Cookie"].split(";")[0]
+        assert "HttpOnly" in e.value.headers["Set-Cookie"] and "SameSite=Strict" in e.value.headers["Set-Cookie"]
+        req = urllib.request.Request(base + "/api/tasks", headers={"Cookie": cookie})
+        with urllib.request.urlopen(req) as r:
+            assert json.loads(r.read())[0]["id"] == tid
+        req = urllib.request.Request(base + "/api/tasks", headers={"Authorization": "Bearer s3cret"})
+        with urllib.request.urlopen(req) as r:
+            assert r.status == 200
+        assert post(f"{base}/api/task/{tid}/approve", headers={"Cookie": cookie})[0] == 409  # past auth
+    finally:
+        srv.shutdown()
