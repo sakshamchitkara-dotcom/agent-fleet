@@ -117,3 +117,19 @@ def test_task_token_budget_is_shared_and_reported(repo, tmp_path):
     assert tok["total"] == sum(tok["by_agent"].values())
     end = read(tmp_path / "home" / "runs" / "t1" / "worker-1.jsonl")[-1]
     assert end["status"] == "budget_exhausted" and end["reason"] == "task token budget"
+
+
+def test_cost_budget_is_a_hard_stop(repo, tmp_path):
+    import json
+    p = tmp_path / "script.json"
+    p.write_text(json.dumps({"planner": ONE_PLAN, "worker": [[{"name": "list_dir", "input": {"path": "."}}]] * 20}))
+    spec = TaskSpec("t1", str(repo), "x", test_cmd="python3 -m unittest -q", sandbox="subprocess",
+                    budget=Budget(max_turns=20), max_cost=0.01)
+    result = Pipeline(spec, ModelFactory("scripted", script=p), tmp_path / "home").run()
+    tok = result["tokens"]
+    assert tok["exhausted"] and tok["max_cost_usd"] == 0.01
+    assert 0.01 <= tok["cost_usd"] < 0.02  # stops within one turn of the limit
+    assert abs(tok["cost_usd"] - sum(tok["cost_by_agent"].values())) < 1e-5
+    end = read(tmp_path / "home" / "runs" / "t1" / "worker-1.jsonl")[-1]
+    assert end["status"] == "budget_exhausted" and end["reason"] == "task cost budget"
+    assert end["turns"] < 20 and end["cost"] > 0

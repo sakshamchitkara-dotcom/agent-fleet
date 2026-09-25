@@ -24,7 +24,8 @@ def home_dir(args) -> Path:
 
 def task_options(args) -> dict:
     opts = {k: getattr(args, k) for k in ("test_cmd", "sandbox", "image", "backend", "model", "effort",
-                                          "max_workers", "review_rounds", "max_turns", "task_tokens", "pr")}
+                                          "max_workers", "review_rounds", "max_turns", "task_tokens", "max_cost",
+                                          "pr")}
     if args.script:
         opts["script"] = str(Path(args.script).resolve())
     return opts
@@ -43,6 +44,8 @@ def add_task_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--review-rounds", type=int, default=2)
     p.add_argument("--max-turns", type=int, default=40, help="turn budget per agent")
     p.add_argument("--task-tokens", type=int, help="token budget shared by all agents of the task")
+    p.add_argument("--max-cost", type=float, metavar="USD",
+                   help="hard stop once the task's estimated API cost reaches this many dollars")
     p.add_argument("--max-attempts", type=int, default=2, help="retries on crashes")
     p.add_argument("--pr", action="store_true",
                    help="push the branch and open a PR (only on repos you own)")

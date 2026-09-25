@@ -6,6 +6,7 @@ import json
 import threading
 from dataclasses import dataclass, field
 
+from . import pricing
 from .roles import Role
 from .tools import Toolbox, ToolError
 from .trajectory import Trajectory
@@ -22,22 +23,38 @@ class Budget:
 
 
 class TokenMeter:
-    """Task-wide token budget shared by every agent working on one task."""
+    """Task-wide token and USD budget shared by every agent working on one task."""
 
-    def __init__(self, limit: int | None = None):
+    def __init__(self, limit: int | None = None, max_cost: float | None = None):
         self.limit = limit
+        self.max_cost = max_cost
         self.used = 0
+        self.cost = 0.0
         self.by_agent: dict[str, int] = {}
+        self.cost_by_agent: dict[str, float] = {}
         self._lock = threading.Lock()
 
-    def charge(self, agent: str, n: int) -> None:
+    def charge(self, agent: str, n: int, usd: float = 0.0) -> None:
         with self._lock:
             self.used += n
+            self.cost += usd
             self.by_agent[agent] = self.by_agent.get(agent, 0) + n
+            self.cost_by_agent[agent] = self.cost_by_agent.get(agent, 0.0) + usd
+
+    @property
+    def over_cost(self) -> bool:
+        return self.max_cost is not None and self.cost >= self.max_cost
 
     @property
     def exhausted(self) -> bool:
-        return self.limit is not None and self.used >= self.limit
+        return (self.limit is not None and self.used >= self.limit) or self.over_cost
+
+    def report(self) -> dict:
+        with self._lock:
+            return {"total": self.used, "by_agent": dict(self.by_agent),
+                    "cost_usd": round(self.cost, 6),
+                    "cost_by_agent": {a: round(c, 6) for a, c in self.cost_by_agent.items()},
+                    "max_cost_usd": self.max_cost, "exhausted": self.exhausted}
 
 
 @dataclass
@@ -46,6 +63,7 @@ class AgentResult:
     output: dict = field(default_factory=dict)
     turns: int = 0
     tokens: int = 0
+    cost: float = 0.0
 
     @property
     def ok(self) -> bool:
@@ -84,25 +102,28 @@ class Agent:
 
     def run(self, task: str) -> AgentResult:
         messages: list[dict] = [{"role": "user", "content": task}]
-        tokens = 0
+        tokens, cost = 0, 0.0
+        model_id = getattr(self.model, "model", None)
         self.log.log("start", task=task, model=getattr(self.model, "model", type(self.model).__name__),
                      sandbox=self.toolbox.sandbox.mode,
                      isolation=self.toolbox.sandbox.isolation, tools=[t["name"] for t in self.tools])
         for turn in range(1, self.budget.max_turns + 1):
             if tokens >= self.budget.max_tokens:
-                return self._end("budget_exhausted", turn - 1, tokens, reason="token budget")
+                return self._end("budget_exhausted", turn - 1, tokens, cost, reason="token budget")
             if self.meter.exhausted:
-                return self._end("budget_exhausted", turn - 1, tokens, reason="task token budget")
+                why = "task cost budget" if self.meter.over_cost else "task token budget"
+                return self._end("budget_exhausted", turn - 1, tokens, cost, reason=why)
             reply = self.model.complete(self.system, messages, self.tools)
             used = reply.usage.get("input_tokens", 0) + reply.usage.get("output_tokens", 0)
-            tokens += used
-            self.meter.charge(self.name, used)
+            usd = pricing.cost(model_id, reply.usage)
+            tokens, cost = tokens + used, cost + usd
+            self.meter.charge(self.name, used, usd)
             self.log.log("model", turn=turn, stop_reason=reply.stop_reason, usage=reply.usage,
-                         content=[_loggable(b) for b in reply.content])
+                         cost=round(usd, 6), content=[_loggable(b) for b in reply.content])
             messages.append({"role": "assistant", "content": reply.content})
 
             if reply.stop_reason == "refusal":
-                return self._end("refused", turn, tokens)
+                return self._end("refused", turn, tokens, cost)
             if not reply.tool_uses:
                 messages.append({"role": "user", "content":
                                  "Continue. Use the tools to make progress, and call `finish` when done."})
@@ -117,10 +138,10 @@ class Agent:
                                 "content": text, "is_error": is_error})
             messages.append({"role": "user", "content": results})
             if finished is not None:
-                return self._end("finished", turn, tokens, output=finished)
+                return self._end("finished", turn, tokens, cost, output=finished)
             if reply.usage.get("input_tokens", 0) >= self.budget.compact_at:
                 messages = self._compact(task, messages)
-        return self._end("budget_exhausted", self.budget.max_turns, tokens, reason="turn budget")
+        return self._end("budget_exhausted", self.budget.max_turns, tokens, cost, reason="turn budget")
 
     def _call(self, tu: dict, truncated: bool) -> tuple[str, bool]:
         name, args = tu["name"], tu.get("input")
@@ -156,9 +177,11 @@ class Agent:
                  f"{task}\n\n## Progress so far (earlier context was compacted)\n{summary}\n\n"
                  "Continue from here."}]
 
-    def _end(self, status: str, turns: int, tokens: int, output: dict | None = None, **extra) -> AgentResult:
-        self.log.log("end", status=status, turns=turns, tokens=tokens, output=output, **extra)
-        return AgentResult(status, output or {}, turns, tokens)
+    def _end(self, status: str, turns: int, tokens: int, cost: float, output: dict | None = None,
+             **extra) -> AgentResult:
+        self.log.log("end", status=status, turns=turns, tokens=tokens, cost=round(cost, 6),
+                     output=output, **extra)
+        return AgentResult(status, output or {}, turns, tokens, cost)
 
 
 def _loggable(block: dict) -> dict:

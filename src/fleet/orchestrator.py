@@ -33,7 +33,7 @@ def spec_for(task: dict) -> TaskSpec:
         image=o.get("image", DEFAULT_IMAGE),
         max_workers=o.get("max_workers", 3), review_rounds=o.get("review_rounds", 2),
         budget=Budget(max_turns=o.get("max_turns", 40), max_tokens=o.get("max_tokens", 3_000_000)),
-        task_tokens=o.get("task_tokens"),
+        task_tokens=o.get("task_tokens"), max_cost=o.get("max_cost"),
     )
 
 
@@ -85,6 +85,10 @@ class Orchestrator:
             return
         success = bool(result["branch"]) and result["tests_passed"]
         error, pr_url = "" if success else "no approved change passed the test suite", ""
+        if not success and result["tokens"].get("exhausted"):
+            t = result["tokens"]
+            error = (f"task budget exhausted: {t['total']:,} tokens, ${t['cost_usd']:.4f}"
+                     + (f" of ${t['max_cost_usd']:.2f}" if t.get("max_cost_usd") else ""))
         if success and task["options"].get("pr"):
             try:
                 self.queue.update(tid, stage="opening PR")
