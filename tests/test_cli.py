@@ -104,3 +104,9 @@ def test_watch_refuses_foreign_repo(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as e:
         main(["--home", str(tmp_path), "watch", "torvalds/linux", "--once"])
     assert "refused" in str(e.value)
+
+
+def test_describe_compaction_shows_its_cost():
+    from fleet.cli import describe
+    e = {"event": "compact", "messages_before": 14, "cost": 0.0312, "usage": {}}
+    assert describe(e) == "# compacted 14 messages into notes ($0.0312)"
