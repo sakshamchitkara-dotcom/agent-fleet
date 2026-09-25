@@ -40,7 +40,8 @@ def spec_for(task: dict) -> TaskSpec:
 def models_for(task: dict) -> ModelFactory:
     o = task["options"]
     return ModelFactory(o.get("backend", "claude"), script=o.get("script"),
-                        model=o.get("model", "claude-opus-5-5"), effort=o.get("effort", "high"))
+                        model=o.get("model", "claude-opus-5-5"), effort=o.get("effort", "high"),
+                        provider=o.get("provider", "anthropic"))
 
 
 def permanent(exc: Exception) -> bool:

@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from . import github
+from .models import PROVIDERS
 from .orchestrator import Orchestrator, short_title
 from .queue import Queue
 from .sandbox import DEFAULT_IMAGE
@@ -25,7 +26,7 @@ def home_dir(args) -> Path:
 
 
 def task_options(args) -> dict:
-    opts = {k: getattr(args, k) for k in ("test_cmd", "sandbox", "image", "backend", "model", "effort",
+    opts = {k: getattr(args, k) for k in ("test_cmd", "sandbox", "image", "backend", "provider", "model", "effort",
                                           "max_workers", "review_rounds", "max_turns", "task_tokens", "max_cost",
                                           "pr")}
     if args.script:
@@ -40,6 +41,8 @@ def add_task_args(p: argparse.ArgumentParser) -> None:
                    help="docker sandbox image (should contain your project's test dependencies)")
     p.add_argument("--backend", choices=["claude", "scripted"], default="claude")
     p.add_argument("--script", help="JSON script for the scripted backend")
+    p.add_argument("--provider", choices=PROVIDERS, default="anthropic",
+                   help="where Claude runs: the Claude API, Amazon Bedrock or Google Vertex AI")
     p.add_argument("--model", default="claude-opus-5-5")
     p.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
     p.add_argument("--max-workers", type=int, default=3, help="parallel workers per task")
@@ -234,13 +237,14 @@ def cmd_bench(args) -> None:
     backend = args.backend
     if backend == "auto":  # real model when credentials are present, else the offline replay
         backend = "claude" if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN") \
-            else "scripted"
+            or args.provider in ("bedrock", "vertex") else "scripted"
     cases = args.cases.split(",") if args.cases else bench.case_names()
     unknown = set(cases) - set(bench.case_names())
     if unknown:
         sys.exit(f"unknown case(s): {', '.join(sorted(unknown))}; have {', '.join(bench.case_names())}")
     home = Path(tempfile.mkdtemp(prefix="fleet-bench-"))
-    opts = {k: getattr(args, k) for k in ("model", "effort", "max_turns", "max_cost") if getattr(args, k)}
+    opts = {k: getattr(args, k) for k in ("provider", "model", "effort", "max_turns", "max_cost")
+            if getattr(args, k)}
     print(f"bench: {len(cases)} case(s), {backend} backend, state in {home}", flush=True)
     results = bench.run(cases, backend, home, sandbox=args.sandbox, concurrency=args.concurrency, **opts)
     print(bench.report(results, backend))
@@ -332,6 +336,7 @@ def main(argv: list[str] | None = None) -> None:
                    help="auto: claude when ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN is set, else scripted")
     p.add_argument("--cases", help="comma-separated subset of cases")
     p.add_argument("--sandbox", choices=["auto", "docker", "subprocess"], default="subprocess")
+    p.add_argument("--provider", choices=PROVIDERS)
     p.add_argument("--model")
     p.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"])
     p.add_argument("--max-turns", type=int)
