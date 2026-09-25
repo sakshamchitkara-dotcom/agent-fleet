@@ -9,10 +9,14 @@ from __future__ import annotations
 
 import re
 import shutil
+import threading
 from pathlib import Path
 
 from .tools import git
 
+# ponytail: one process-wide lock around worktree add/remove (git takes repo-wide
+# locks for these); per-repo locks if many repos are worked on at once.
+_WT_LOCK = threading.Lock()
 GITHUB = re.compile(r"^(?:https://github\.com/)?([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
 
 
@@ -53,14 +57,16 @@ def add_worktree(repo: Path, path: Path, branch: str | None, base: str) -> Path:
     if path.exists():
         remove_worktree(repo, path)
     target = ["-B", branch] if branch else ["--detach"]
-    git(repo, "worktree", "add", "--quiet", *target, str(path), base)
+    with _WT_LOCK:
+        git(repo, "worktree", "add", "--quiet", *target, str(path), base)
     return path
 
 
 def remove_worktree(repo: Path, path: Path) -> None:
-    git(repo, "worktree", "remove", "--force", str(path), check=False)
-    shutil.rmtree(path, ignore_errors=True)
-    git(repo, "worktree", "prune", check=False)
+    with _WT_LOCK:
+        git(repo, "worktree", "remove", "--force", str(path), check=False)
+        shutil.rmtree(path, ignore_errors=True)
+        git(repo, "worktree", "prune", check=False)
 
 
 def commit_all(worktree: Path, message: str) -> bool:
