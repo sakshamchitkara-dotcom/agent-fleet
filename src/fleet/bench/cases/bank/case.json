@@ -1,0 +1,2 @@
+{"task": "Two bank bugs: transfer() lets accounts go negative instead of raising InsufficientFunds, and compound(1000, 5, 2) returns 36000 instead of 1102.5.",
+ "test_cmd": "python -m unittest"}

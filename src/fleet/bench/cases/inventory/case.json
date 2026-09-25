@@ -1,0 +1,2 @@
+{"task": "add_item() leaks items between unrelated calls: add_item('pear', 1) returns apples added earlier.",
+ "test_cmd": "python -m unittest"}

@@ -1,0 +1,22 @@
+{
+  "planner": [
+    [{"name": "repo_map", "input": {}}],
+    [{"name": "search_symbols", "input": {"query": "transfer|compound"}}],
+    [{"name": "finish", "input": {"summary": "Independent bugs in two modules.", "subtasks": [
+      {"title": "Refuse overdrafts in transfer", "description": "In bank/accounts.py, transfer() must raise InsufficientFunds (before moving any money) when src.balance < amount."},
+      {"title": "Treat rate as a percentage in compound", "description": "In bank/interest.py, compound() uses rate_percent as a fraction; divide it by 100."}]}}]
+  ],
+  "worker-1": [
+    [{"name": "read_file", "input": {"path": "bank/accounts.py"}}],
+    [{"name": "apply_patch", "input": {"path": "bank/accounts.py", "old": "        raise ValueError(\"amount must be positive\")\n", "new": "        raise ValueError(\"amount must be positive\")\n    if src.balance < amount:\n        raise InsufficientFunds(f\"{src.owner} has {src.balance}, needs {amount}\")\n"}}],
+    [{"name": "run_command", "input": {"command": "python -m unittest tests.test_accounts"}}],
+    [{"name": "finish", "input": {"summary": "transfer checks the balance before moving money.", "tests_passed": true}}]
+  ],
+  "worker-2": [
+    [{"name": "read_file", "input": {"path": "bank/interest.py"}}],
+    [{"name": "apply_patch", "input": {"path": "bank/interest.py", "old": "(1 + rate_percent)", "new": "(1 + rate_percent / 100)"}}],
+    [{"name": "run_command", "input": {"command": "python -m unittest tests.test_interest"}}],
+    [{"name": "finish", "input": {"summary": "rate_percent is converted to a fraction.", "tests_passed": true}}]
+  ],
+  "reviewer": [[{"name": "finish", "input": {"verdict": "approve", "feedback": "Minimal, correct."}}]]
+}

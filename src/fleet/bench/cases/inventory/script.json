@@ -1,0 +1,14 @@
+{
+  "planner": [
+    [{"name": "search_symbols", "input": {"query": "add_item"}}],
+    [{"name": "finish", "input": {"summary": "Mutable default argument shared across calls.", "subtasks": [
+      {"title": "Remove mutable default", "description": "In inventory.py, add_item(name, qty, stock={}) shares one dict across calls. Default to None and create a new dict per call."}]}}]
+  ],
+  "worker": [
+    [{"name": "read_file", "input": {"path": "inventory.py"}}],
+    [{"name": "apply_patch", "input": {"path": "inventory.py", "old": "def add_item(name, qty, stock={}):\n    \"\"\"Return a stock mapping with `qty` more of `name` (a new mapping unless one is passed).\"\"\"\n", "new": "def add_item(name, qty, stock=None):\n    \"\"\"Return a stock mapping with `qty` more of `name` (a new mapping unless one is passed).\"\"\"\n    if stock is None:\n        stock = {}\n"}}],
+    [{"name": "run_tests", "input": {}}],
+    [{"name": "finish", "input": {"summary": "Default stock is None, so each call gets a fresh dict.", "tests_passed": true}}]
+  ],
+  "reviewer": [[{"name": "finish", "input": {"verdict": "approve", "feedback": "Classic mutable-default fix."}}]]
+}

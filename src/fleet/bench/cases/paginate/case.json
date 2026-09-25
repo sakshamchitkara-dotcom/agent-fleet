@@ -1,0 +1,2 @@
+{"task": "Pagination drops the last item of every full page: page(list(range(25)), 0, 10) returns 9 items. Fix it.",
+ "test_cmd": "python -m unittest"}
