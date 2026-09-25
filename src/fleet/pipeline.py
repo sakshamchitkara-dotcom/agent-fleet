@@ -12,19 +12,12 @@ from typing import Callable
 from .agent import Agent, AgentResult, Budget, TokenMeter
 from .roles import INTEGRATOR, PLANNER, REVIEWER, TESTER, WORKER, Role
 from .sandbox import DEFAULT_IMAGE, Sandbox
-from .tools import Toolbox, diff, git
+from .tools import Toolbox, diff, git, is_test_path
 from .trajectory import Trajectory, summarize
 from .workspace import add_worktree, commit_all, head, ident, prepare_repo, remove_worktree
 
 MAX_SUBTASKS = 4
 CONFLICT = re.compile(r"^(<{7}|>{7})( |$)", re.M)
-TEST_PATH = re.compile(r"(^|/)(tests?|spec|__tests__)/|(^|/)test_[^/]*$|_test\.[^/]+$|\.(test|spec)\.[^/]+$")
-
-
-def is_test_path(path: str) -> bool:
-    return bool(TEST_PATH.search(path))
-
-
 @dataclass
 class TaskSpec:
     task_id: str
@@ -159,8 +152,8 @@ class Pipeline:
             f"({sub['title']}):\n{sub['description']}")
         commit_all(wt, f"Add regression test: {sub['title']}\n\nfleet task {self.spec.task_id}, tester-{i}")
         files = git(wt, "diff", "--name-only", self.base, "HEAD").split()
-        # ponytail: "red" = the test command narrowed to the new files fails. A --test-cmd that
-        # already names its files runs those too, so a pre-existing failure also reads as red.
+        # "red" = the test command narrowed to the new files fails; files the command already
+        # names are left out of that run (Toolbox.narrowed).
         ok, _ = self.toolbox(wt).run_tests(files) if files else (True, "")
         red = None
         if files and all(is_test_path(f) for f in files) and not ok:

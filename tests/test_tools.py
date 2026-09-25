@@ -59,3 +59,16 @@ def test_unknown_tool(tb):
 def test_schemas_include_finish(tb):
     names = [t["name"] for t in tb.schemas({"type": "object", "properties": {}}, "done")]
     assert names[-1] == "finish" and "apply_patch" in names
+
+
+def test_narrowed_test_command(repo, tmp_path):
+    (repo / "tests").mkdir()
+    (repo / "pytest.ini").write_text("")
+    narrow = lambda cmd: Toolbox(repo, test_cmd=cmd).narrowed(["tests/test_new.py"])
+    # named test files and directories are replaced by the new files; options and config stay
+    assert narrow("python3 -m unittest -q test_calc.py") == "python3 -m unittest -q tests/test_new.py"
+    assert narrow("pytest -c pytest.ini tests") == "pytest -c pytest.ini tests/test_new.py"
+    assert narrow("node --test") == "node --test tests/test_new.py"
+    # unknown runners and shell pipelines are not narrowed
+    for cmd in ("npm test", "make test", "go test ./...", "cd sub && pytest", "pytest | tee log"):
+        assert narrow(cmd) is None, cmd

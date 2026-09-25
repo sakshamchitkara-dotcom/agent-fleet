@@ -143,12 +143,12 @@ REGRESSION = ("import unittest\nfrom calc import add\n\n\nclass Regression(unitt
 FIX = [[{"name": "apply_patch", "input": {"path": "calc.py", "old": "a - b", "new": "a + b"}}]]
 
 
-def run_test_first(repo, tmp_path, tester):
+def run_test_first(repo, tmp_path, tester, test_cmd="python3 -m unittest -q"):
     import json
     tmp_path.mkdir(parents=True, exist_ok=True)
     p = tmp_path / "script.json"
     p.write_text(json.dumps({"planner": ONE_PLAN, "tester": tester, "worker": FIX, "reviewer": APPROVE}))
-    spec = TaskSpec("t1", str(repo), "Fix the failing test", test_cmd="python3 -m unittest -q",
+    spec = TaskSpec("t1", str(repo), "Fix the failing test", test_cmd=test_cmd,
                     sandbox="subprocess", budget=Budget(max_turns=10), test_first=True)
     return Pipeline(spec, ModelFactory("scripted", script=p), tmp_path / "home").run()
 
@@ -181,6 +181,19 @@ def test_test_first_drops_a_test_that_passes_or_touches_code(repo, tmp_path):
         [{"name": "write_file", "input": {"path": "test_regression.py", "content": REGRESSION}},
          {"name": "apply_patch", "input": {"path": "calc.py", "old": "a * b", "new": "a * b  # touched"}}]])
     assert result["subtasks"][0]["regression_test"] is None  # edited non-test code: dropped
+
+
+def test_test_first_ignores_failures_of_files_the_test_cmd_names(repo, tmp_path):
+    # test_calc.py already fails on base; a passing new test must not read as red because of it
+    passing = REGRESSION.replace("add(-2, 5), 3", "2 + 2, 4")
+    cmd = "python3 -m unittest -q test_calc.py"
+    result = run_test_first(repo, tmp_path, [
+        [{"name": "write_file", "input": {"path": "test_regression.py", "content": passing}}]], cmd)
+    assert result["subtasks"][0]["regression_test"] is None
+
+    result = run_test_first(make_repo(tmp_path / "r2"), tmp_path / "second", [
+        [{"name": "write_file", "input": {"path": "test_regression.py", "content": REGRESSION}}]], cmd)
+    assert result["subtasks"][0]["regression_test"]["files"] == ["test_regression.py"]
 
 
 def test_is_test_path():
