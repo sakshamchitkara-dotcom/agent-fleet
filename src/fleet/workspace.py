@@ -28,8 +28,12 @@ def parse_github(source: str) -> tuple[str, str] | None:
     return (m.group(1), m.group(2)) if m else None
 
 
-def prepare_repo(source: str, cache: Path) -> Path:
-    """Return a local git repo for `source`, cloning/fetching GitHub repos into `cache`."""
+def prepare_repo(source: str, cache: Path, update: bool = True) -> Path:
+    """Return a local git repo for `source`, cloning/fetching GitHub repos into `cache`.
+
+    update=False (resuming a task) keeps an existing clone as is: its worktrees
+    and fleet branches belong to the interrupted run.
+    """
     gh = parse_github(source)
     if gh is None:
         path = Path(source).expanduser().resolve()
@@ -38,6 +42,8 @@ def prepare_repo(source: str, cache: Path) -> Path:
         return path
     owner, name = gh
     dest = cache / "repos" / f"{owner}__{name}"
+    if (dest / ".git").exists() and not update:
+        return dest
     if (dest / ".git").exists():
         git(dest, "fetch", "--quiet", "origin")
         git(dest, "reset", "--quiet", "--hard", "origin/HEAD")
@@ -51,14 +57,23 @@ def head(repo: Path) -> str:
     return git(repo, "rev-parse", "HEAD").strip()
 
 
-def add_worktree(repo: Path, path: Path, branch: str | None, base: str) -> Path:
-    """Check out `base` into `path` on a fresh `branch` (detached if branch is None)."""
+def add_worktree(repo: Path, path: Path, branch: str | None, base: str, keep: bool = False) -> Path:
+    """Check out `base` into `path` on a fresh `branch` (detached if branch is None).
+
+    With keep=True (resuming), an existing worktree is reused as is, uncommitted
+    edits included, and an existing branch is checked out instead of reset.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    if keep and (path / ".git").exists():
+        return path
     if path.exists():
         remove_worktree(repo, path)
-    target = ["-B", branch] if branch else ["--detach"]
+    if keep and branch and git(repo, "branch", "--list", branch).strip():
+        args = [str(path), branch]
+    else:
+        args = [*(["-B", branch] if branch else ["--detach"]), str(path), base]
     with _WT_LOCK:
-        git(repo, "worktree", "add", "--quiet", *target, str(path), base)
+        git(repo, "worktree", "add", "--quiet", *args)
     return path
 
 

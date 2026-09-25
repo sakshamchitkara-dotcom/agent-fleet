@@ -109,6 +109,9 @@ class ScriptedModel:
     def load(cls, path: str | Path, agent: str) -> "ScriptedModel":
         return cls(json.loads(Path(path).read_text()), agent)
 
+    def resume(self, turns_done: int) -> None:
+        self.cursor = turns_done
+
     def complete(self, system: str, messages: list[dict], tools: list[dict]) -> Reply:
         if self.cursor < len(self.turns):
             turn = self.turns[self.cursor]

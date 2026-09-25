@@ -55,25 +55,38 @@ class Pipeline:
     def toolbox(self, wt: Path) -> Toolbox:
         return Toolbox(wt, Sandbox(wt, mode=self.spec.sandbox, image=self.spec.image), self.spec.test_cmd)
 
-    def agent(self, name: str, role: Role, wt: Path) -> Agent:
+    def agent(self, name: str, role: Role, wt: Path, resume: bool = True) -> Agent:
         return Agent(name, role, self.models(name), self.toolbox(wt),
-                     Trajectory(self.runs / f"{name}.jsonl", name), self.spec.budget, self.meter)
+                     Trajectory(self.runs / f"{name}.jsonl", name), self.spec.budget, self.meter, resume)
+
+    def started(self, agent: str) -> bool:
+        """Whether a previous attempt already ran this agent (so its worktree is resumed)."""
+        return (self.runs / f"{agent}.jsonl").exists()
+
+    def cleanup(self) -> None:
+        if self.repo is None:
+            return
+        for wt in (self.wt_root.iterdir() if self.wt_root.exists() else []):
+            remove_worktree(self.repo, wt)
 
     # -- stages -----------------------------------------------------------
     def run(self) -> dict:
-        self.progress("preparing")
-        self.repo = prepare_repo(self.spec.repo, self.home)
-        self.base = head(self.repo)
-        try:
-            subtasks, plan = self.plan()
-            self.progress(f"working ({len(subtasks)} subtasks)")
-            with ThreadPoolExecutor(max_workers=max(1, self.spec.max_workers)) as pool:
-                work = list(pool.map(lambda a: self.work(*a), enumerate(subtasks, 1)))
-            self.progress("integrating")
-            integration = self.integrate(work)
-        finally:
-            for wt in (self.wt_root.iterdir() if self.wt_root.exists() else []):
-                remove_worktree(self.repo, wt)
+        resuming = self.runs.exists()
+        self.progress("resuming" if resuming else "preparing")
+        self.repo = prepare_repo(self.spec.repo, self.home, update=not resuming)
+        base_file = self.runs / "base"
+        self.base = base_file.read_text().strip() if resuming and base_file.exists() else head(self.repo)
+        self.runs.mkdir(parents=True, exist_ok=True)
+        base_file.write_text(self.base)
+        # Worktrees survive a crash so a retry or a restarted orchestrator resumes the
+        # agents' checkpoints against the files they were editing; cleanup() on success.
+        subtasks, plan = self.plan()
+        self.progress(f"working ({len(subtasks)} subtasks)")
+        with ThreadPoolExecutor(max_workers=max(1, self.spec.max_workers)) as pool:
+            work = list(pool.map(lambda a: self.work(*a), enumerate(subtasks, 1)))
+        self.progress("integrating")
+        integration = self.integrate(work)
+        self.cleanup()
         for b in integration["merged"]:  # history lives on in the merge commits of fleet/<task>
             git(self.repo, "branch", "-D", b, check=False)
         return {"repo": str(self.repo), "base": self.base, "plan": plan, "subtasks": work, **integration,
@@ -81,7 +94,7 @@ class Pipeline:
 
     def plan(self) -> tuple[list[dict], str]:
         self.progress("planning")
-        wt = add_worktree(self.repo, self.wt_root / "planner", None, self.base)
+        wt = add_worktree(self.repo, self.wt_root / "planner", None, self.base, keep=self.started("planner"))
         res = self.agent("planner", PLANNER, wt).run(
             f"Task:\n{self.spec.text}\n\nExplore the repository and produce a plan.")
         subtasks = [s for s in res.output.get("subtasks", [])
@@ -93,7 +106,7 @@ class Pipeline:
     def work(self, i: int, sub: dict) -> dict:
         name = f"worker-{i}"
         branch = self.branch(f"w{i}")
-        wt = add_worktree(self.repo, self.wt_root / name, branch, self.base)
+        wt = add_worktree(self.repo, self.wt_root / name, branch, self.base, keep=self.started(name))
         prompt = (f"Overall task:\n{self.spec.text}\n\nYour subtask ({sub['title']}):\n"
                   f"{sub['description']}")
         rounds, verdict, feedback = [], "none", ""
@@ -164,5 +177,7 @@ class Pipeline:
 
     def integrator(self, wt: Path, problem: str) -> AgentResult:
         self._integrator_runs += 1
-        return self.agent(f"integrator-{self._integrator_runs}", INTEGRATOR, wt).run(
+        # Integration restarts from base on resume (merges are cheap and deterministic),
+        # so integrator agents start fresh instead of resuming a stale checkpoint.
+        return self.agent(f"integrator-{self._integrator_runs}", INTEGRATOR, wt, resume=False).run(
             f"Overall task:\n{self.spec.text}\n\n{problem}")

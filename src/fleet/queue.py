@@ -88,9 +88,11 @@ class Queue:
         return status
 
     def requeue_stale(self) -> int:
-        """Tasks left 'running' by a dead orchestrator go back to the queue."""
+        """Tasks left 'running' by a dead orchestrator go back to the queue. The
+        interrupted attempt is not counted: the task resumes from its checkpoints."""
         with self._db() as db:
-            return db.execute("UPDATE tasks SET status='queued', updated=? WHERE status='running'",
+            return db.execute("UPDATE tasks SET status='queued', attempts=MAX(attempts - 1, 0), "
+                              "stage='interrupted', updated=? WHERE status='running'",
                               (time.time(),)).rowcount
 
     def cancel(self, tid: str) -> bool:
