@@ -64,3 +64,12 @@ def test_pr_body():
         "plan": "one step", "diffstat": " calc.py | 2 +-", "tests_passed": True, "test_output": "OK",
         "subtasks": [{"title": "Fix add", "verdict": "approve", "rounds": [{"summary": "fixed"}]}]})
     assert "PASSING" in body and "calc.py | 2" in body and "`approve`" in body and "`abc`" in body
+
+
+def test_pr_body_links_issue_and_title_cut_at_word():
+    from fleet.orchestrator import short_title
+    body = pr_body({"id": "abc", "text": "x", "options": {"issue": 7}}, {"subtasks": []})
+    assert body.endswith("Closes #7")
+    t = short_title("Fix #1: Discounts are inverted: apply_discount returns the discount instead of the price")
+    assert len(t) <= 72 and t.endswith("...") and not t.endswith(" ...")
+    assert t == "Fix #1: Discounts are inverted: apply_discount returns the discount..."
