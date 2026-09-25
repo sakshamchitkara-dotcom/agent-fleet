@@ -128,6 +128,15 @@ class Pipeline:
                 f"previous attempt (already applied in this worktree):\n{feedback}\n\nAddress them.")
             commit_all(wt, f"{sub['title']}\n\nfleet task {self.spec.task_id}, {agent_name}")
             rounds.append({"agent": agent_name, "status": res.status, "summary": res.output.get("summary", "")})
+            if red and (touched := git(wt, "diff", "--name-only", red["commit"], "HEAD", "--", *red["files"]).split()):
+                # A fix that edits the test it is meant to satisfy proves nothing: put the test
+                # back and send the worker round again without spending a review on it.
+                git(wt, "checkout", red["commit"], "--", *touched)
+                commit_all(wt, f"Restore regression test {', '.join(touched)}\n\nfleet task {self.spec.task_id}")
+                verdict, feedback = "request_changes", (
+                    f"You changed the regression test ({', '.join(touched)}); it has been restored. "
+                    "Make it pass by fixing the code, not the test.")
+                continue
             if not diff(wt, self.base).strip():
                 verdict, feedback = "no_changes", "worker produced no changes"
                 break
