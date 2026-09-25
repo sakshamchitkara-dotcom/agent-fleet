@@ -4,7 +4,7 @@ Each case in `cases/<name>/` has `repo/` (a tiny project with a failing test
 suite), `case.json` (`task`, `test_cmd`) and `script.json` (the scripted
 backend's solution, so the harness itself is testable offline). A case passes
 when the fleet's branch passes the test suite in a clean checkout *and* the
-tests themselves were left untouched.
+seeded tests were left untouched (new test files are allowed).
 """
 
 from __future__ import annotations
@@ -56,7 +56,9 @@ def verify(repo: Path, branch: str | None, test_cmd: str) -> tuple[bool, str]:
     """Independent check on a clean checkout of the branch, outside the fleet's sandbox."""
     if not branch:
         return False, "no branch produced"
-    if git(repo, "diff", "--name-only", "main", branch, "--", "tests").strip():
+    # New regression tests are welcome (--test-first writes them); changing or deleting
+    # the seeded ones is how a fix could cheat.
+    if git(repo, "diff", "--name-only", "--no-renames", "--diff-filter=MDT", "main", branch, "--", "tests").strip():
         return False, "tests were modified"
     with tempfile.TemporaryDirectory(prefix="fleet-bench-verify-") as d:
         git(repo, "worktree", "add", "--quiet", "--detach", d, branch)
