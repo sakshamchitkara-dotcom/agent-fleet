@@ -77,9 +77,39 @@ def cmd_issue(args) -> None:
         github.assert_owned(owner, repo)
     issue = github.fetch_issue(owner, repo, number)
     print(f"issue: {issue['title']} ({issue['url']})")
-    tid = submit(args, f"{owner}/{repo}", github.issue_task_text(owner, repo, number, issue),
-                 title=short_title(f"Fix #{number}: {issue['title']}"), issue=number)
-    drain_and_report(args, tid)
+    drain_and_report(args, submit_issue(args, owner, repo, number, issue))
+
+
+def submit_issue(args, owner: str, repo: str, number: int, issue: dict) -> str:
+    return submit(args, f"{owner}/{repo}", github.issue_task_text(owner, repo, number, issue),
+                  title=short_title(f"Fix #{number}: {issue['title']}"), issue=number)
+
+
+def cmd_watch(args) -> None:
+    """Poll an owned repo for open issues with a label; dry-run unless --apply."""
+    if parse_github(args.repo) is None or args.repo.count("/") != 1:
+        sys.exit(f"expected owner/repo, got {args.repo!r}")
+    owner, repo = args.repo.split("/")
+    github.assert_owned(owner, repo)  # owned repos only, even in dry-run
+    q = Queue(home_dir(args) / "fleet.db")
+    mode = "apply" + (" + PR" if args.pr else "") if args.apply else "dry-run"
+    print(f"watching {owner}/{repo} for open issues labeled {args.label!r} ({mode})", flush=True)
+    while True:
+        new = [i for i in github.labeled_issues(owner, repo, args.label)
+               if not q.find_issue(f"{owner}/{repo}", i["number"])]
+        for i in new:
+            if not args.apply:
+                print(f"would work on #{i['number']}: {i['title']}  (pass --apply to run it)")
+                continue
+            tid = submit_issue(args, owner, repo, i["number"], i)
+            print(f"#{i['number']}: {i['title']} -> task {tid}", flush=True)
+        if args.apply and new:
+            Orchestrator(home_dir(args), q, args.concurrency).run(drain=True)
+            for i in new:
+                show(args, q.find_issue(f"{owner}/{repo}", i["number"])["id"])
+        if args.once:
+            return
+        time.sleep(args.interval)
 
 
 def drain_and_report(args, tid: str) -> None:
@@ -259,6 +289,16 @@ def main(argv: list[str] | None = None) -> None:
     add_task_args(p)
     p.add_argument("--concurrency", type=int, default=2)
     p.set_defaults(fn=cmd_issue)
+
+    p = sub.add_parser("watch", help="poll an owned GitHub repo for labeled issues (dry-run by default)")
+    p.add_argument("repo", help="owner/repo (must be owned by the authenticated gh user)")
+    p.add_argument("--label", default="fleet")
+    p.add_argument("--apply", action="store_true", help="actually queue and run matching issues")
+    p.add_argument("--interval", type=int, default=60, help="seconds between polls")
+    p.add_argument("--once", action="store_true", help="poll once and exit")
+    add_task_args(p)
+    p.add_argument("--concurrency", type=int, default=2)
+    p.set_defaults(fn=cmd_watch)
 
     p = sub.add_parser("worker", help="process queued tasks")
     p.add_argument("--concurrency", type=int, default=2)

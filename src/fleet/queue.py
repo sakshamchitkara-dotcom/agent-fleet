@@ -107,6 +107,13 @@ class Queue:
                               "updated=? WHERE id=? AND status IN ('failed', 'cancelled')",
                               (time.time(), tid)).rowcount == 1
 
+    def find_issue(self, repo: str, number: int) -> dict | None:
+        """Latest task created for GitHub issue repo#number, if any."""
+        with self._db() as db:
+            row = db.execute("SELECT * FROM tasks WHERE repo=? AND json_extract(options, '$.issue')=? "
+                             "ORDER BY created DESC LIMIT 1", (repo, number)).fetchone()
+        return _row(row) if row else None
+
     def get(self, tid: str) -> dict | None:
         with self._db() as db:
             row = db.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
