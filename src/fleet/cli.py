@@ -23,7 +23,7 @@ def home_dir(args) -> Path:
 
 def task_options(args) -> dict:
     opts = {k: getattr(args, k) for k in ("test_cmd", "sandbox", "backend", "model", "effort",
-                                          "max_workers", "review_rounds", "max_turns", "pr")}
+                                          "max_workers", "review_rounds", "max_turns", "task_tokens", "pr")}
     if args.script:
         opts["script"] = str(Path(args.script).resolve())
     return opts
@@ -39,6 +39,7 @@ def add_task_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-workers", type=int, default=3, help="parallel workers per task")
     p.add_argument("--review-rounds", type=int, default=2)
     p.add_argument("--max-turns", type=int, default=40, help="turn budget per agent")
+    p.add_argument("--task-tokens", type=int, help="token budget shared by all agents of the task")
     p.add_argument("--max-attempts", type=int, default=2, help="retries on crashes")
     p.add_argument("--pr", action="store_true",
                    help="push the branch and open a PR (only on repos you own)")

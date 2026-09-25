@@ -101,3 +101,17 @@ def test_planner_without_subtasks_falls_back_to_whole_task(repo, tmp_path):
         "reviewer": APPROVE,
     })
     assert result["subtasks"][0]["title"] == "Complete the task" and result["tests_passed"]
+
+
+def test_task_token_budget_is_shared_and_reported(repo, tmp_path):
+    import json
+    p = tmp_path / "script.json"
+    p.write_text(json.dumps({"planner": ONE_PLAN, "worker": [[{"name": "list_dir", "input": {"path": "."}}]] * 20}))
+    spec = TaskSpec("t1", str(repo), "x", test_cmd="python3 -m unittest -q", sandbox="subprocess",
+                    budget=Budget(max_turns=20), task_tokens=3000)
+    result = Pipeline(spec, ModelFactory("scripted", script=p), tmp_path / "home").run()
+    tok = result["tokens"]
+    assert set(tok["by_agent"]) >= {"planner", "worker-1"}
+    assert tok["total"] == sum(tok["by_agent"].values())
+    end = read(tmp_path / "home" / "runs" / "t1" / "worker-1.jsonl")[-1]
+    assert end["status"] == "budget_exhausted" and end["reason"] == "task token budget"
