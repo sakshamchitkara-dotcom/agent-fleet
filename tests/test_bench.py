@@ -1,14 +1,34 @@
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+import pytest
+
 from fleet import bench
 from fleet.tools import git
 
 
-def test_every_case_starts_red(tmp_path):
-    import subprocess
-    import sys
-    for case in bench.case_names():
-        repo = bench.seed_repo(case, tmp_path / case)
-        r = subprocess.run([sys.executable, "-m", "unittest"], cwd=repo, capture_output=True)
-        assert r.returncode != 0, f"{case} has no failing test"
+NODE = shutil.which("node")
+
+
+@pytest.mark.parametrize("case", bench.case_names())
+def test_every_case_starts_red(tmp_path, case):
+    spec = json.loads((bench.CASES / case / "case.json").read_text())
+    if spec["test_cmd"].startswith("node") and not NODE:
+        pytest.skip("node is not installed")
+    repo = bench.seed_repo(case, tmp_path / case)
+    r = subprocess.run(spec["test_cmd"], shell=True, cwd=repo, capture_output=True,
+                       env={**os.environ, "PATH": os.path.dirname(sys.executable) + os.pathsep + os.environ["PATH"]})
+    assert r.returncode != 0, f"{case} has no failing test"
+
+
+@pytest.mark.skipif(not NODE, reason="node is not installed")
+def test_scripted_bench_fixes_the_node_cases(tmp_path):
+    cases = [c for c in bench.case_names() if c.endswith(("-js", "-ts"))]
+    results = bench.run(cases, "scripted", tmp_path, sandbox="subprocess")
+    assert cases and all(r.passed for r in results), results
 
 
 def test_scripted_bench_passes_and_reports(tmp_path):

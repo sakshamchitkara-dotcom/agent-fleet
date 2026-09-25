@@ -1,0 +1,2 @@
+{"task": "countWords() in words.js miscounts: countWords('  hello   world ') returns 6 instead of 2, and countWords('') returns 1 instead of 0.",
+ "test_cmd": "node --test"}
