@@ -155,7 +155,8 @@ class Agent:
             if finished is not None:
                 return self._end("finished", turn, tokens, cost, output=finished)
             if reply.usage.get("input_tokens", 0) >= self.budget.compact_at:
-                messages = self._compact(task, messages)
+                messages, used, usd = self._compact(task, messages, model_id)
+                tokens, cost = tokens + used, cost + usd
             self._checkpoint(turn, tokens, cost, messages)
         return self._end("budget_exhausted", self.budget.max_turns, tokens, cost, reason="turn budget")
 
@@ -201,17 +202,22 @@ class Agent:
         return AgentResult(end["status"], end.get("output") or {}, end.get("turns", 0),
                            end.get("tokens", 0), end.get("cost", 0.0))
 
-    def _compact(self, task: str, messages: list[dict]) -> list[dict]:
+    def _compact(self, task: str, messages: list[dict], model_id) -> tuple[list[dict], int, float]:
         """Simple compaction: replace the whole history with a summary.
 
         Earlier thinking blocks are not replayed into the fresh context, so this
-        stays valid under preserved thinking (no in-place history edits).
+        stays valid under preserved thinking (no in-place history edits). The
+        summary call is a real request: it is charged to the agent and the task.
         """
-        summary = self.model.summarize(render_transcript(messages))
-        self.log.log("compact", messages_before=len(messages), summary=summary)
-        return [{"role": "user", "content":
-                 f"{task}\n\n## Progress so far (earlier context was compacted)\n{summary}\n\n"
-                 "Continue from here."}]
+        summary, usage = self.model.summarize(render_transcript(messages))
+        used = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+        usd = pricing.cost(model_id, usage)
+        self.meter.charge(self.name, used, usd)
+        self.log.log("compact", messages_before=len(messages), usage=usage, cost=round(usd, 6),
+                     summary=summary)
+        return ([{"role": "user", "content":
+                  f"{task}\n\n## Progress so far (earlier context was compacted)\n{summary}\n\n"
+                  "Continue from here."}], used, usd)
 
     def _end(self, status: str, turns: int, tokens: int, cost: float, output: dict | None = None,
              **extra) -> AgentResult:

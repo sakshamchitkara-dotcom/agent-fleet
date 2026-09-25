@@ -91,3 +91,24 @@ def test_compaction_uses_summary_in_fresh_context(repo, tmp_path):
     s = client.summary_requests[0]
     assert s["model"] == "claude-opus-5-5" and s["thinking"] == {"type": "adaptive"}
     assert "TOOL CALL list_dir" in s["messages"][0]["content"]
+
+
+def test_compaction_call_is_charged(repo, tmp_path):
+    from fleet.pricing import cost
+    from fleet.trajectory import read, spend
+    client = FakeClient([
+        msg([{"type": "tool_use", "id": "t1", "name": "list_dir", "input": {"path": "."}}], inp=500),
+        msg([{"type": "tool_use", "id": "t2", "name": "finish",
+              "input": {"summary": "done", "tests_passed": False}}]),
+    ])
+    agent = Agent("worker-1", WORKER, ClaudeModel(client=client), Toolbox(repo),
+                  Trajectory(tmp_path / "t.jsonl", "worker-1"), Budget(compact_at=400))
+    res = agent.run("the task")
+    turns = cost("claude-opus-5-5", {"input_tokens": 500, "output_tokens": 20}) + \
+        cost("claude-opus-5-5", {"input_tokens": 100, "output_tokens": 20})
+    summary = cost("claude-opus-5-5", {"input_tokens": 100, "output_tokens": 20})
+    assert abs(res.cost - (turns + summary)) < 1e-9 and res.tokens == 640 + 120
+    assert abs(agent.meter.cost - res.cost) < 1e-9
+    compact = next(e for e in read(tmp_path / "t.jsonl") if e["event"] == "compact")
+    assert compact["usage"]["input_tokens"] == 100 and compact["cost"] > 0
+    assert abs(spend(tmp_path)["t"]["cost"] - res.cost) < 1e-6
