@@ -22,6 +22,13 @@ class Trajectory:
             f.write(line + "\n")
 
 
+def isolation(runs: str | Path) -> str:
+    """Sandbox isolation the task's agents ran under (from their start events)."""
+    seen = sorted({e["isolation"] for f in Path(runs).glob("*.jsonl") for e in read(f)
+                   if e.get("event") == "start" and e.get("isolation")})
+    return "; ".join(seen)
+
+
 def read(path: str | Path) -> list[dict]:
     """Read a trajectory, skipping a partially-written trailing line."""
     out = []

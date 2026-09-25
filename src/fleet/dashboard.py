@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .queue import Queue
-from .trajectory import read
+from .trajectory import isolation, read
 
 TASK_ID = re.compile(r"^[0-9a-f]{8}$")
 
@@ -56,7 +56,7 @@ function describe(e) {
   if (e.event === "tool") return `${e.is_error ? "!" : ">"} ${e.name} ${JSON.stringify(e.input).slice(0, 160)}`;
   if (e.event === "model") { const t = (e.content || []).filter(b => b.type === "text").map(b => b.text).join(" ");
     return `~ turn ${e.turn} (${e.stop_reason}) ${t.slice(0, 300)}`; }
-  if (e.event === "start") return `+ start (${e.sandbox || "?"} sandbox): ${e.task.split("\\n").find(l => l.trim() && !/^(Overall )?task:$/i.test(l.trim())) || ""}`.slice(0, 200);
+  if (e.event === "start") return `+ start (${(e.isolation || e.sandbox || "?").split(":")[0]} sandbox): ${e.task.split("\\n").find(l => l.trim() && !/^(Overall )?task:$/i.test(l.trim())) || ""}`.slice(0, 200);
   if (e.event === "end") return `= ${e.status} after ${e.turns} turns, ${e.tokens} tokens`;
   if (e.event === "compact") return `# compacted ${e.messages_before} messages`;
   return `# ${e.event}`;
@@ -83,6 +83,8 @@ async function detail(id) {
     el("p", {}, el("b", {class: `s-${t.status}`}, t.status), ` - ${t.stage} - attempt ${t.attempts}/${t.max_attempts} - `,
       t.repo, t.pr_url ? " - " : "", t.pr_url ? el("a", {href: t.pr_url}, t.pr_url) : ""),
     el("pre", {}, t.text));
+  if (d.isolation) head.append(el("p", {class: /NOT confined/.test(d.isolation) ? "s-failed" : "muted"},
+    `sandbox: ${d.isolation}`));
   if (r.branch !== undefined) head.append(el("p", {}, `branch ${r.branch} - tests ${r.tests_passed ? "PASS" : "FAIL"}`),
     el("pre", {}, r.diffstat || "(no changes)"));
   if (t.error) head.append(el("pre", {class: "s-failed"}, t.error));
@@ -140,7 +142,7 @@ def make_handler(home: Path):
                 # start order; name breaks ties (glob order differs across filesystems)
                 logs.sort(key=lambda kv: (kv[1][0]["ts"] if kv[1] else 0, kv[0]))
                 agents = {name: evs[-300:] for name, evs in logs}
-                return self.json({"task": task, "agents": agents})
+                return self.json({"task": task, "agents": agents, "isolation": isolation(runs)})
             self.json({"error": "not found"}, 404)
 
     return Handler
