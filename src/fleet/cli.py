@@ -181,7 +181,19 @@ def cmd_cancel(args) -> None:
 
 def cmd_retry(args) -> None:
     ok = Queue(home_dir(args) / "fleet.db").retry(args.id)
-    print("requeued; run `fleet worker` to process it" if ok else "only failed or cancelled tasks can be retried")
+    if not ok:
+        return print("only failed or cancelled tasks can be retried")
+    # A retry starts from scratch: move the old trajectories and checkpoints aside so
+    # agents do not resume or replay the run that failed.
+    runs = home_dir(args) / "runs" / args.id
+    old = [f for f in runs.iterdir() if f.is_file()] if runs.exists() else []
+    if old:
+        dest = runs / f"attempt-{int(time.time())}"
+        dest.mkdir()
+        for f in old:
+            f.rename(dest / f.name)
+        print(f"previous run kept in {dest}")
+    print("requeued; run `fleet worker` to process it")
 
 
 def cmd_serve(args) -> None:
