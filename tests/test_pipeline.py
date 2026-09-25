@@ -35,6 +35,7 @@ def test_single_worker_happy_path(repo, tmp_path):
     assert "return a - b" in (repo / "calc.py").read_text()  # user checkout untouched
     assert stages[0] == "preparing" and "integrating" in stages
     assert not (tmp_path / "home" / "worktrees" / "t1" / "worker-1").exists()  # cleaned up
+    assert git(repo, "branch", "--list", "fleet/*").split() == ["fleet/t1"]  # merged branch deleted
     runs = tmp_path / "home" / "runs" / "t1"
     assert {p.stem for p in runs.iterdir()} == {"planner", "worker-1", "reviewer-1"}
     assert read(runs / "worker-1.jsonl")[-1]["status"] == "finished"
@@ -61,6 +62,7 @@ def test_rejected_work_is_not_merged(repo, tmp_path):
         "reviewer": [[{"name": "finish", "input": {"verdict": "request_changes", "feedback": "no"}}]],
     })
     assert result["branch"] is None and result["skipped"] == ["fleet/t1-w1"]
+    assert "fleet/t1-w1" in git(repo, "branch", "--list", "fleet/*")  # kept for inspection
     assert len(result["subtasks"][0]["rounds"]) == 3  # first try + 2 revisions
 
 

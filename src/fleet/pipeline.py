@@ -73,6 +73,8 @@ class Pipeline:
         finally:
             for wt in (self.wt_root.iterdir() if self.wt_root.exists() else []):
                 remove_worktree(self.repo, wt)
+        for b in integration["merged"]:  # history lives on in the merge commits of fleet/<task>
+            git(self.repo, "branch", "-D", b, check=False)
         return {"repo": str(self.repo), "base": self.base, "plan": plan, "subtasks": work, **integration,
                 "tokens": {"total": self.meter.used, "by_agent": self.meter.by_agent}}
 
