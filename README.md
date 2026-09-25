@@ -492,10 +492,11 @@ duplicate of #4 and is closed; see `CHANGELOG.md` for what changed since.
   `kernel.apparmor_restrict_unprivileged_userns=0`). `fleet status` tells you which you got.
 - Cost is an estimate: first-party list prices unless you pass `--prices`; batch
   discounts, long-context premiums and the 1-hour cache TTL are not modelled.
-- `--test-first` decides a test is "red" by running the test command with the new files
-  appended; that narrows pytest, unittest, node --test, jest, vitest, mocha and rspec, but a
-  `--test-cmd` that already names its files (or a runner that ignores file arguments) runs
-  more, so a pre-existing failure can pass for red.
+- `--test-first` decides a test is "red" by running only the new test files: for pytest,
+  unittest, node --test, jest, vitest, mocha and rspec the test files and directories named in
+  `--test-cmd` are swapped for them. Any other command (`npm test`, `make`, `go test ./...`,
+  shell pipelines) runs whole, so the tester is only used when that suite passes on the base
+  code. A regression test added *inside* an already-failing test file can still pass for red.
 - The symbol index is regex-based outside Python (parsed files are cached by mtime).
 - CI exercises Python, JavaScript and TypeScript test commands; others work through
   `--test-cmd` but are untested.
