@@ -63,7 +63,8 @@ def test_docker_argv_isolates(tmp_path):
 
 @pytest.mark.skipif(os.environ.get("FLEET_DOCKER_TESTS") != "1", reason="set FLEET_DOCKER_TESTS=1")
 def test_docker_backend_has_no_network(tmp_path):
-    sb = Sandbox(tmp_path, mode="docker", timeout=60)
+    sb = Sandbox(tmp_path, mode="docker", timeout=60)  # builds the default image if missing
+    assert sb.run("python -m pytest --version").exit_code == 0
     r = sb.run("echo ok > out.txt && python -c \"import socket; socket.create_connection(('1.1.1.1', 53), 3)\"")
     assert (tmp_path / "out.txt").read_text().strip() == "ok"
     assert r.exit_code != 0  # network unreachable inside the container

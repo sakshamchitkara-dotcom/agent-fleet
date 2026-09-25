@@ -15,6 +15,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,6 +42,25 @@ _DENY = [(re.compile(p), why) for p, why in DENYLIST]
 SECRET_ENV = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)", re.I)
 
 MAX_OUTPUT = 20_000
+
+# Default container: python + pytest, built locally on first use (the build is
+# the only step with network; commands inside the sandbox never get any).
+DEFAULT_IMAGE = "agent-fleet-sandbox:py3.12"
+DEFAULT_DOCKERFILE = "FROM python:3.12-slim\nRUN pip install --no-cache-dir pytest\n"
+_image_lock = threading.Lock()
+
+
+def ensure_image(image: str) -> None:
+    """Build DEFAULT_IMAGE if missing; other images are the user's responsibility."""
+    if image != DEFAULT_IMAGE:
+        return
+    with _image_lock:
+        if subprocess.run(["docker", "image", "inspect", image], capture_output=True).returncode == 0:
+            return
+        r = subprocess.run(["docker", "build", "-q", "-t", image, "-"], input=DEFAULT_DOCKERFILE,
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            raise RuntimeError(f"building sandbox image failed: {r.stderr.strip()[-2000:]}")
 
 
 def check_command(cmd: str) -> str | None:
@@ -82,7 +102,7 @@ class Sandbox:
     """Runs commands with the workspace as the only writable root."""
 
     def __init__(self, root: str | Path, mode: str = "auto", timeout: int = 120,
-                 image: str = "python:3.12-slim"):
+                 image: str = DEFAULT_IMAGE):
         self.root = Path(root).resolve()
         if mode == "auto":
             mode = "docker" if docker_available() else "subprocess"
@@ -91,6 +111,8 @@ class Sandbox:
         self.mode = mode
         self.timeout = timeout
         self.image = image
+        if mode == "docker":
+            ensure_image(image)
 
     def run(self, cmd: str, timeout: int | None = None) -> Result:
         reason = check_command(cmd)

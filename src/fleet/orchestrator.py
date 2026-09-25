@@ -12,6 +12,7 @@ from .agent import Budget
 from .models import ModelFactory
 from .pipeline import Pipeline, TaskSpec
 from .queue import Queue
+from .sandbox import DEFAULT_IMAGE
 from .workspace import parse_github
 
 log = logging.getLogger("fleet")
@@ -29,7 +30,7 @@ def spec_for(task: dict) -> TaskSpec:
     return TaskSpec(
         task_id=task["id"], repo=task["repo"], text=task["text"],
         test_cmd=o.get("test_cmd", "python -m pytest -q"), sandbox=o.get("sandbox", "auto"),
-        image=o.get("image", "python:3.12-slim"),
+        image=o.get("image", DEFAULT_IMAGE),
         max_workers=o.get("max_workers", 3), review_rounds=o.get("review_rounds", 2),
         budget=Budget(max_turns=o.get("max_turns", 40), max_tokens=o.get("max_tokens", 3_000_000)),
         task_tokens=o.get("task_tokens"),
