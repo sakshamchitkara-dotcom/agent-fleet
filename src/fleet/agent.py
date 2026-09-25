@@ -64,7 +64,8 @@ class Agent:
     def run(self, task: str) -> AgentResult:
         messages: list[dict] = [{"role": "user", "content": task}]
         tokens = 0
-        self.log.log("start", task=task)
+        self.log.log("start", task=task, model=getattr(self.model, "model", type(self.model).__name__),
+                     sandbox=self.toolbox.sandbox.mode, tools=[t["name"] for t in self.tools])
         for turn in range(1, self.budget.max_turns + 1):
             if tokens >= self.budget.max_tokens:
                 return self._end("budget_exhausted", turn - 1, tokens, reason="token budget")

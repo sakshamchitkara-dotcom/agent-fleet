@@ -135,7 +135,7 @@ class Pipeline:
                                 "Fix the integration so the full suite passes.")
             commit_all(wt, f"Fix integration of fleet task {self.spec.task_id}")
             ok, tests = self.toolbox(wt).run_tests()
-        stat = git(wt, "diff", "--stat", self.base, "HEAD").strip()
+        stat = git(wt, "diff", "--stat", self.base, "HEAD").rstrip()
         return {"branch": branch if merged else None, "merged": merged, "skipped": skipped,
                 "tests_passed": ok, "test_output": tests[-4000:], "diffstat": stat,
                 "diff": git(wt, "diff", self.base, "HEAD")[:40_000]}
