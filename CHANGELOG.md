@@ -4,6 +4,22 @@ All notable changes to agent-fleet. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-09-25
+
+### Added
+- **Repository conventions**: a root `AGENTS.md` and/or `CLAUDE.md` (read from the task's base
+  commit, symlinks and duplicates once, capped at 20k characters) is appended to every
+  agent's system prompt.
+- **Dashboard access token**: `fleet serve` requires a token (random per start, `--token` or
+  `FLEET_DASHBOARD_TOKEN`; `--no-auth` to disable). The printed link sets an `HttpOnly`,
+  `SameSite=Strict` cookie; API clients can send `Authorization: Bearer`.
+
+### Fixed
+- `--test-first` counted pre-existing failures as a red regression test when `--test-cmd`
+  named test files itself (`node --test tests/a.test.ts`, `pytest tests/`): those paths are
+  now swapped for the new test files. Commands that can't be narrowed (`npm test`, `make`,
+  `go test ./...`, pipelines) only get a tester when the suite passes on base.
+
 ## [0.3.0] - 2026-09-25
 
 ### Added
